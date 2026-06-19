@@ -78,7 +78,7 @@ footer a{color:var(--accent);text-decoration:none}
   </div>
 </header>
 
-<div class="section" id="sectionConfig" style="display:none;margin:1.5rem 0">
+<div class="section" id="sectionConfig" style="margin:1.5rem 0">
   <div class="section-title"><span class="arrow">▸</span> Configuration</div>
   <div class="code-block" style="margin:0;">
     <label style="font-size:.78rem;color:var(--text-dim);">MicroChat-CPU path:</label>
@@ -185,11 +185,10 @@ async function loadFile(file) {
     const avgTokens = toks.length ? Math.round(toks.reduce((a,b)=>a+b,0)/toks.length) : 0;
     const totalChars = chars.length ? chars.reduce((a,b)=>a+b,0) : 0;
 
-    document.getElementById('sectionStats').classList.add('visible');
     document.getElementById('sectionResults').classList.add('visible');
     document.getElementById('sectionTrain').classList.add('visible');
     document.getElementById('sectionSmoke').classList.add('visible');
-    document.getElementById('sectionConfig').classList.add('visible');
+    document.getElementById('sectionStats').classList.add('visible');
 
     document.getElementById('statsGrid').innerHTML = `
       <div class="stat-card accent"><div class="num">${data.length.toLocaleString()}</div><div class="label">Examples</div></div>
