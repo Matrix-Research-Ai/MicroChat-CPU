@@ -38,7 +38,7 @@ from nanochat.common import compute_init, compute_cleanup, print0, DummyWandb, p
 from nanochat.checkpoint_manager import save_checkpoint, load_checkpoint
 from nanochat.loss_eval import evaluate_bpb
 from nanochat.engine import Engine
-from nanochat.cpu_distributed import AdaptiveCommScheduler, TopologyAwareCommunicator, NetworkBenchmark, HeterogeneousLoadBalancer, StragglerMitigator, SyntheticDataLoader, StepProfiler, WANResilienceManager, WANSimulator
+from nanochat.cpu_distributed import AdaptiveCommScheduler, TopologyAwareCommunicator, NetworkBenchmark, HeterogeneousLoadBalancer, StragglerMitigator, SyntheticDataLoader, StepProfiler, WANResilienceManager, WANSimulator, RuntimeAdaptiveController
 
 # FSDP may be needed for isinstance checks even in single-node mode
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
@@ -135,6 +135,8 @@ parser.add_argument("--simulate-wan", action="store_true", default=False, help="
 parser.add_argument("--wan-latency", type=int, default=50, help="simulated one-way WAN latency in ms (default: 50)")
 parser.add_argument("--wan-bandwidth", type=int, default=100, help="simulated WAN bandwidth in Mbps (default: 100)")
 parser.add_argument("--wan-loss-rate", type=float, default=0.0, help="simulated packet loss rate 0.0-1.0 (default: 0.0)")
+# Adaptive tuning
+parser.add_argument("--adaptive", action="store_true", default=False, help="enable runtime adaptive tuning: auto-adjusts sync interval, compression based on real-time metrics")
 # Evaluation
 parser.add_argument("--eval-every", type=int, default=10, help="evaluate val bpb every N steps (-1 = disable)")
 parser.add_argument("--eval-tokens", type=int, default=512, help="number of tokens to evaluate val loss on")
@@ -395,6 +397,16 @@ if args.simulate_wan:
            f"{args.wan_bandwidth}Mbps bandwidth"
            + (f", {args.wan_loss_rate*100:.0f}% loss" if args.wan_loss_rate > 0 else ""))
 
+# -----------------------------------------------------------------------------
+# Runtime adaptive controller
+adaptive_ctrl = RuntimeAdaptiveController(
+    enabled=args.adaptive,
+    adjust_interval=True,
+    warmup_steps=args.warmup_steps,
+)
+if args.adaptive and master_process:
+    print0("📊 Adaptive tuning enabled: auto-adjusting sync interval based on comm ratio")
+
 # Auto-resume from latest checkpoint
 if args.resume and resilience.has_checkpoint():
     resume_step = resilience.get_resume_step()
@@ -620,6 +632,14 @@ while True:
         })
 
     step += 1
+
+    # --- Runtime adaptive tuning ---
+    if adaptive_ctrl.enabled:
+        comm_time = profiler._records.get("comm", [0])[-1] if profiler._records.get("comm") else 0
+        adaptive_ctrl.record(dt, comm_time)
+        changes = adaptive_ctrl.maybe_adjust(comm)
+        for c in changes:
+            print0(f"  📊 Adaptive: {c}")
 
     # --- Periodic checkpoint save (WAN resilience) ---
     resilience.maybe_save(

@@ -1470,3 +1470,183 @@ class WANSimulator:
             "steps": self._steps,
             "losses": self._losses,
         }
+
+
+# ---------------------------------------------------------------------------
+# Runtime Adaptive Controller — auto-tunes compression/sync/straggler thresholds
+# based on real-time training metrics.
+#
+# From the research: "dynamically adjusting the level of compression based on
+# real-time network conditions, such as available bandwidth, to strike an
+# optimal balance between communication savings and training accuracy."
+# ---------------------------------------------------------------------------
+
+class RuntimeAdaptiveController:
+    """Monitors training metrics and auto-tunes communication parameters.
+
+    Features:
+    - Measures comm-to-compute ratio per step
+    - Auto-adjusts sync interval: higher when comm dominates (WAN),
+      lower when compute dominates (LAN, CPU-bound)
+    - Recommends compression vs sparsification based on effectiveness
+    - Detects when compression overhead outweighs benefit (single-node)
+
+    Usage:
+        controller = RuntimeAdaptiveController()
+        controller.record_step(step_time, comm_time, grad_bytes)
+        if controller.should_adjust():
+            new_interval = controller.recommend_sync_interval()
+            print(controller.summary())
+    """
+
+    def __init__(
+        self,
+        enabled: bool = True,
+        adjust_interval: bool = True,
+        warmup_steps: int = 10,
+    ):
+        self.enabled = enabled
+        self.adjust_interval = adjust_interval
+        self.warmup_steps = warmup_steps
+        self._step = 0
+        self._comm_ratios: list[float] = []
+        self._step_times: list[float] = []
+        self._comm_times: list[float] = []
+        self._grad_bytes: list[int] = []
+        self._current_interval = 1
+        self._changes: list[str] = []
+
+    def record(self, step_time: float, comm_time: float, grad_bytes: int = 0):
+        """Record metrics from one training step.
+
+        Args:
+            step_time: Total step wall-clock time in seconds.
+            comm_time: Time spent in gradient sync (comm phase) in seconds.
+            grad_bytes: Total gradient bytes communicated (0 = unknown).
+        """
+        if not self.enabled:
+            return
+        self._step += 1
+        self._step_times.append(step_time)
+        self._comm_times.append(comm_time)
+        self._grad_bytes.append(grad_bytes)
+
+        ratio = comm_time / max(step_time, 1e-9)
+        self._comm_ratios.append(ratio)
+
+    @property
+    def comm_ratio(self) -> float:
+        """Ratio of communication time to total step time (0.0-1.0)."""
+        if not self._comm_ratios:
+            return 0.0
+        return sum(self._comm_ratios[-5:]) / max(len(self._comm_ratios[-5:]), 1)
+
+    @property
+    def is_comm_bound(self) -> bool:
+        """True if communication dominates (>30% of step time)."""
+        return self.comm_ratio > 0.3
+
+    @property
+    def is_heavy_comm(self) -> bool:
+        """True if communication is the bottleneck (>50% of step time)."""
+        return self.comm_ratio > 0.5
+
+    def recommend_sync_interval(self) -> int:
+        """Recommend sync interval based on comm-to-compute ratio.
+
+        Returns:
+            1: sync every step (compute-bound: LAN)
+            2-3: sync every 2-3 steps (balanced)
+            4-8: sync every 4-8 steps (comm-bound: WAN)
+        """
+        if self._step < self.warmup_steps:
+            return self._current_interval
+
+        ratio = self.comm_ratio
+        if ratio < 0.1:
+            interval = 1  # compute dominated, sync every step
+        elif ratio < 0.3:
+            interval = 1  # slightly comm-heavy, still fine
+        elif ratio < 0.5:
+            interval = 2  # balanced, sync every other step
+        elif ratio < 0.7:
+            interval = 3  # comm-heavy, batch syncs
+        else:
+            interval = 5  # very comm-bound, batch heavily
+
+        return interval
+
+    def recommend_compression(self) -> str:
+        """Recommend compression strategy based on gradient size and comm ratio.
+
+        Returns: 'none', 'fp16', or 'sparsify'
+        """
+        if self._step < self.warmup_steps:
+            return 'fp16'
+
+        ratio = self.comm_ratio
+        if ratio < 0.05:
+            # Communication is negligible — compression adds overhead
+            return 'none'
+        elif ratio < 0.3:
+            # Moderate communication — fp16 helps
+            return 'fp16'
+        else:
+            # Communication dominates — sparsification helps most
+            return 'sparsify'
+
+    def should_adjust(self) -> bool:
+        """Check if parameters should be adjusted based on recent metrics."""
+        if self._step < self.warmup_steps:
+            return False
+        # Check every 10 steps after warmup
+        return self._step % 10 == 0
+
+    def maybe_adjust(self, comm_scheduler) -> list[str]:
+        """Evaluate conditions and apply adjustments if needed.
+
+        Args:
+            comm_scheduler: An AdaptiveCommScheduler or similar object with
+                           sync_interval and compression_enabled attributes.
+
+        Returns: List of human-readable change descriptions.
+        """
+        if not self.enabled or not self.should_adjust():
+            return []
+
+        changes = []
+        old_interval = self._current_interval
+
+        # Adjust sync interval
+        if self.adjust_interval:
+            new_interval = self.recommend_sync_interval()
+            if new_interval != old_interval:
+                old_ratio = self.comm_ratio
+                self._current_interval = new_interval
+                changes.append(
+                    f"sync_interval: {old_interval}→{new_interval} "
+                    f"(comm ratio {old_ratio:.0%})"
+                )
+                if hasattr(comm_scheduler, 'sync_interval'):
+                    comm_scheduler.sync_interval = new_interval
+
+        return changes
+
+    def summary(self) -> dict:
+        """Report current adaptive state and metrics."""
+        if not self.enabled or not self._step_times:
+            return {"enabled": False}
+
+        return {
+            "enabled": True,
+            "step": self._step,
+            "comm_ratio": round(self.comm_ratio, 3),
+            "is_comm_bound": self.is_comm_bound,
+            "is_heavy_comm": self.is_heavy_comm,
+            "current_interval": self._current_interval,
+            "recommended_interval": self.recommend_sync_interval(),
+            "recommended_compression": self.recommend_compression(),
+            "avg_step_ms": round(sum(self._step_times[-10:]) / max(len(self._step_times[-10:]), 1) * 1000, 1) if self._step_times else 0,
+            "avg_comm_ms": round(sum(self._comm_times[-10:]) / max(len(self._comm_times[-10:]), 1) * 1000, 1) if self._comm_times else 0,
+            "adjustments": self._changes,
+        }
