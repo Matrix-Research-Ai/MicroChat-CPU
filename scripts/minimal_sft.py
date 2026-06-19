@@ -7,6 +7,12 @@ from nanochat.gpt import GPT, GPTConfig
 from nanochat.tokenizer import RustBPETokenizer, get_token_bytes
 from nanochat.common import get_base_dir, print0
 
+# Allow overriding steps from command line
+import argparse
+parser = argparse.ArgumentParser()
+parser.add_argument("--steps", type=int, default=20, help="Number of SFT steps")
+parsed_args, _ = parser.parse_known_args()
+
 device = torch.device("cpu")
 base_dir = get_base_dir()
 
@@ -28,7 +34,6 @@ print0("Tokenizer loaded")
 sft_path = r"C:\Users\Admin\epub2dataset_data\encyclopedia_sft.jsonl"
 with open(sft_path, encoding="utf-8") as f:
     raw = [json.loads(l) for l in f if l.strip()]
-    # Wrap in {"messages": ...} format for render_conversation
     conversations = [{"messages": c} if isinstance(c, list) else c for c in raw]
 print0(f"Loaded {len(conversations)} conversations")
 
@@ -40,7 +45,8 @@ for group in optimizer.param_groups:
 # Training loop
 max_seq_len = 822
 bos = tokenizer.get_bos_token_id()
-num_iters = 20
+num_iters = parsed_args.steps
+print0(f"Training for {num_iters} SFT steps")
 step = 0
 for epoch in range(5):
     import random
@@ -54,7 +60,6 @@ for epoch in range(5):
         if len(ids) > max_seq_len + 1:
             ids = ids[:max_seq_len + 1]
             mask = mask[:max_seq_len + 1]
-        # Pad if too short
         if len(ids) < max_seq_len + 1:
             pad_len = max_seq_len + 1 - len(ids)
             ids = ids + [bos] * pad_len
@@ -62,13 +67,11 @@ for epoch in range(5):
         x = torch.tensor([ids[:-1]], dtype=torch.long, device=device)
         y = torch.tensor([ids[1:]], dtype=torch.long, device=device)
         m = torch.tensor([mask[1:]], dtype=torch.int8, device=device)
-        y[m == 0] = -1  # mask non-assistant tokens
-        
+        y[m == 0] = -1
         loss = model(x, y)
         loss.backward()
         optimizer.step()
         optimizer.zero_grad()
-        
         step += 1
         if step % 5 == 0 or step == num_iters:
             print0(f"Step {step}/{num_iters} | loss: {loss.item():.4f}")

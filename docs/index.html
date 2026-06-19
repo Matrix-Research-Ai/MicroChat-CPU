@@ -94,7 +94,9 @@ footer a{color:var(--accent);text-decoration:none}
       <button class="btn btn-secondary" onclick="document.getElementById('outputDataDir').value='C:\\Users\\Admin\\Downloads\\MicroChat-CPU\\microchat_data'" style="font-size:.7rem;padding:.3rem .6rem;">Reset</button>
     </div>
     <label style="font-size:.78rem;color:var(--text-dim);margin-top:.5rem;display:block;">
-      <input type="checkbox" id="chkSFT" checked> Also run SFT fine-tuning after pretraining
+      <input type="checkbox" id="chkSFT" checked> Run SFT fine-tuning
+      <input type="number" id="sftSteps" value="20" min="5" max="500" step="5"
+        style="width:60px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:.15rem .3rem;color:var(--text);font-family:var(--font);font-size:.78rem;margin-left:.3rem;"> steps
     </label>
     <p style="font-size:.7rem;color:var(--text-dim);margin-top:.3rem;">These paths will be baked into the downloaded scripts.</p>
   </div>
@@ -215,7 +217,7 @@ async function loadFile(file) {
     // Fix: total-batch-size must be divisible by max-seq-len × device-batch-size
     const fixedBatch = maxSeqLen;
 
-    document.getElementById('autoParams').innerHTML = `<strong>⚡ Auto-params:</strong> depth=${depth}, max-seq-len=${maxSeqLen}, total-batch-size=${fixedBatch}, num-iterations=${numIter} + tokenizer + SFT (20 steps)`;
+    document.getElementById('autoParams').innerHTML = `<strong>⚡ Auto-params:</strong> depth=${depth}, max-seq-len=${maxSeqLen}, total-batch-size=${fixedBatch}, num-iterations=${numIter} + tokenizer + SFT (${sftSteps} steps)`;
 
     // Convert in-browser via Pyodide
     setStatus('loading', '⏳ Converting to Parquet in-browser...');
@@ -282,6 +284,8 @@ for l in lines:
 
     const mcPath = document.getElementById('microchatPath').value;
     const outPath = document.getElementById('outputDataDir').value;
+    const doSFT = document.getElementById('chkSFT').checked;
+    const sftSteps = parseInt(document.getElementById('sftSteps').value) || 20;
     const valRows = Math.round(trainRows * 0.05);
 
     // One-shot training script (Windows PowerShell .ps1)
@@ -345,16 +349,32 @@ try { & ".venv/Scripts/python" -m scripts.tok_train --vocab-size=32768 --max-cha
 Write-Host "=== Step 5: Train model ===" -ForegroundColor Cyan
 & ".venv/Scripts/python" -m scripts.cpu_train --depth=${depth} --num-iterations=${numIter} --max-seq-len=${maxSeqLen} --device-batch-size=1 --total-batch-size=${fixedBatch} --eval-tokens=0
 
-Write-Host "=== Step 6: SFT fine-tuning ===" -ForegroundColor Cyan
-& ".venv/Scripts/python" scripts/minimal_sft.py
+if (Test-Path "scripts/minimal_sft.py") {
+    Write-Host "=== Step 6: SFT fine-tuning (${sftSteps} steps) ===" -ForegroundColor Cyan
+    & ".venv/Scripts/python" scripts/minimal_sft.py --steps ${sftSteps}
+    Write-Host "SFT complete! Model saved to chatsft_checkpoints/d6/" -ForegroundColor Green
+}
 
 Write-Host "\`n========================================" -ForegroundColor Green
 Write-Host "Training complete!" -ForegroundColor Green
-Write-Host "Chat with: .venv/Scripts/python -m scripts.chat_cli --source=sft --model-tag=d${depth} --step=20 --device-type=cpu" -ForegroundColor Green
+Write-Host "Chat with: .venv/Scripts/python -m scripts.chat_cli --source=sft --model-tag=d${depth} --step=${sftSteps} --device-type=cpu" -ForegroundColor Green
 Write-Host "\`n========================================" -ForegroundColor Green
 Read-Host "Press Enter to exit"
 `;
     makeDownloadBtn('⬇ train_all.ps1 (Windows)', 'btn-green', trainPs1, 'train_all.ps1');
+
+    // Standalone SFT-only script (retrain with different steps)
+    const sftOnlyPs1 = `<#
+SFT fine-tuning only — run after pretraining is done
+#>
+$MICROCHAT_DIR = "${mcPath}"
+Set-Location $MICROCHAT_DIR
+Write-Host "Running SFT fine-tuning (${sftSteps} steps)..." -ForegroundColor Cyan
+& ".venv/Scripts/python" scripts/minimal_sft.py --steps ${sftSteps}
+Write-Host "Done! Chat with: .venv/Scripts/python -m scripts.chat_cli --source=sft --model-tag=d6 --step=${sftSteps} --device-type=cpu" -ForegroundColor Green
+Read-Host "Press Enter to exit"
+`;
+    makeDownloadBtn('⬇ sft_only.ps1 (retrain SFT)', 'btn-secondary', sftOnlyPs1, 'sft_only.ps1');
 
     // Also generate a .bat wrapper that bypasses PowerShell execution policy
     const wrapperBat = `@echo off
