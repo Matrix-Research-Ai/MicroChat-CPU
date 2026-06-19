@@ -328,10 +328,10 @@ if ($DATA_DIR) {
 Write-Host "=== Step 4: Train ===" -ForegroundColor Cyan
 python -m scripts.cpu_train --depth=${depth} --num-iterations=${numIter} --max-seq-len=${maxSeqLen} --device-batch-size=1 --total-batch-size=${totalBatch} --eval-tokens=0
 
-Write-Host "`n========================================" -ForegroundColor Green
+Write-Host "\`n========================================" -ForegroundColor Green
 Write-Host "Training complete!" -ForegroundColor Green
 Write-Host "Chat with: python -m scripts.chat_cli --model-tag=d${depth}" -ForegroundColor Green
-Write-Host "========================================" -ForegroundColor Green
+Write-Host "\`n========================================" -ForegroundColor Green
 Read-Host "Press Enter to exit"
 `;
     makeDownloadBtn('⬇ train_all.ps1 (Windows)', 'btn-green', trainPs1, 'train_all.ps1');
