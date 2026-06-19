@@ -190,6 +190,8 @@ else:
 # -----------------------------------------------------------------------------
 # Tokenizer (optional in synthetic mode)
 vocab_size = 50304  # default GPT-2 vocab size
+tokenizer = None
+token_bytes = None
 if args.synthetic:
     tokenizer = None
     token_bytes = torch.ones(vocab_size, dtype=torch.long, device=device)
