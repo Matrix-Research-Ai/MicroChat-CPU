@@ -601,13 +601,13 @@ class TopologyAwareCommunicator:
     # Async overlap for topology-aware mode
     # -------------------------------------------------------------------
 
-    def start_async_sync(self) -> Optional[list]:
+    def start_async_sync(self) -> Optional[object]:
         """Fire off async hierarchical gradient sync.
 
-        For single-group (LAN), runs async compressed all-reduce.
-        For multi-group (WAN), runs the full sync synchronously for now
-        (async hierarchical is more involved — future work).
-        Returns a handle list or None.
+        For single-group (LAN): runs async compressed all-reduce.
+        For multi-group (WAN): starts intra-group all-reduce async,
+        returns a handle that tracks all 3 phases (intra → inter → broadcast).
+        The training loop's overlap window runs while intra-group comms finish.
         """
         if not dist.is_initialized():
             return None
@@ -627,19 +627,111 @@ class TopologyAwareCommunicator:
                     handles.append((p, grad_fp16, handle))
                 return handles
             return None
-        else:
-            # Multi-group: run hierarchical sync synchronously for now
-            self.sync_gradients(do_average=True)
-            return None
 
-    def wait_for_sync(self, handle: Optional[list]):
-        """Wait for an async sync started by start_async_sync()."""
+        # Multi-group: Phase 1 — async intra-group all-reduce
+        # This is the expensive step that benefits from async overlap
+        intra_handles = []
+        for p in self._params:
+            if p.grad is None:
+                continue
+            grad = p.grad.data
+            if self.compression_enabled:
+                grad_fp16 = grad.to(torch.float16)
+            else:
+                grad_fp16 = grad  # use original if not compressing
+
+            if self._intra_group_pg is not None:
+                handle = dist.all_reduce(
+                    grad_fp16 if self.compression_enabled else grad,
+                    op=dist.ReduceOp.SUM,
+                    group=self._intra_group_pg,
+                    async_op=True,
+                )
+                intra_handles.append((p, grad_fp16 if self.compression_enabled else grad, handle))
+            else:
+                intra_handles.append((p, grad, None))
+
+        return {
+            "type": "hierarchical",
+            "intra_handles": intra_handles,
+            "group_size": self._group_size,
+            "num_groups": self._num_groups,
+            "is_leader": self._is_leader,
+            "intra_group_pg": self._intra_group_pg,
+            "inter_group_pg": self._inter_group_pg,
+            "group_leader": self._groups[self._group_id][0] if self._groups else 0,
+            "compression_enabled": self.compression_enabled,
+        }
+
+    def wait_for_sync(self, handle: Optional[object]):
+        """Wait for async hierarchical sync started by start_async_sync().
+
+        For single-group: waits for the all-reduce and restores FP32.
+        For multi-group: completes all 3 phases:
+          1. Wait for intra-group all-reduce
+          2. Inter-group all-reduce (leaders only, across WAN)
+          3. Broadcast results back to group members
+        """
         if handle is None:
             return
-        world_size = dist.get_world_size()
-        for p, grad_fp16, ah in handle:
-            ah.wait()
-            p.grad.data = grad_fp16.to(torch.float32) / world_size
+
+        # Single group: classic flat wait
+        if isinstance(handle, list):
+            world_size = dist.get_world_size()
+            for p, grad_fp16, ah in handle:
+                ah.wait()
+                p.grad.data = grad_fp16.to(torch.float32) / world_size
+            return
+
+        # Multi-group (hierarchical): complete all 3 phases
+        if isinstance(handle, dict) and handle.get("type") == "hierarchical":
+            intra = handle["intra_handles"]
+            group_size = handle["group_size"]
+            num_groups = handle["num_groups"]
+            is_leader = handle["is_leader"]
+            intra_pg = handle["intra_group_pg"]
+            inter_pg = handle["inter_group_pg"]
+            leader_rank = handle["group_leader"]
+            comp_enabled = handle["compression_enabled"]
+
+            # Phase 1b: Wait for intra-group all-reduce
+            for p, buf, ah in intra:
+                if ah is not None:
+                    ah.wait()
+                if comp_enabled:
+                    # Convert fp16 back to fp32
+                    grad_fp32 = buf.to(torch.float32)
+                else:
+                    grad_fp32 = buf
+                # Average within group
+                grad_fp32 /= group_size
+                # Store temporarily for inter-group phase
+                p.grad.data = grad_fp32
+
+            # Phase 2: Inter-group all-reduce (leaders only, across WAN)
+            if inter_pg is not None and is_leader:
+                inter_handles = []
+                for p in self._params:
+                    if p.grad is None:
+                        continue
+                    grad_fp16 = p.grad.data.to(torch.float16)
+                    handle2 = dist.all_reduce(
+                        grad_fp16, op=dist.ReduceOp.SUM,
+                        group=inter_pg, async_op=True,
+                    )
+                    inter_handles.append((p, grad_fp16, handle2))
+
+                # Wait for inter-group
+                for p, grad_fp16, ah in inter_handles:
+                    ah.wait()
+                    p.grad.data = grad_fp16.to(torch.float32) / num_groups
+
+            # Phase 3: Broadcast leader's result back to group members
+            if intra_pg is not None:
+                for p in self._params:
+                    if p.grad is None:
+                        continue
+                    dist.broadcast(p.grad.data, src=leader_rank, group=intra_pg)
 
     def summary(self) -> dict:
         return {
