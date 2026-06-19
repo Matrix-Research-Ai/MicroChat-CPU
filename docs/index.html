@@ -2,8 +2,9 @@
 <html lang="en">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MicroChat-CPU — Dataset to Training</title>
-<meta name="description" content="Drag & drop your JSONL dataset — automatically convert, generate scripts, and train.">
+<meta name="description" content="Drag & drop your JSONL dataset — convert to Parquet in-browser, then train with one command.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🧠</text></svg>">
+<script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js"></script>
 <style>
 :root{--bg:#0a0a0f;--surface:#12121a;--surface2:#181825;--border:#1e1e2e;--text:#c8c8d4;--text-dim:#6b6b80;--accent:#7c5cfc;--accent-dim:rgba(124,92,252,.12);--green:#4ade80;--blue:#60a5fa;--orange:#fb923c;--red:#f87171;--font:'SF Mono','Cascadia Code','JetBrains Mono','Fira Code',monospace}
 *{margin:0;padding:0;box-sizing:border-box}
@@ -39,105 +40,82 @@ header::before{content:'';position:absolute;top:0;left:50%;transform:translateX(
 .stat-card .num{font-size:1.3rem;font-weight:700;font-family:var(--font);color:#fff}
 .stat-card .label{font-size:.65rem;color:var(--text-dim);margin-top:.15rem}
 .stat-card.accent .num{color:var(--accent)}.stat-card.green .num{color:var(--green)}.stat-card.blue .num{color:var(--blue)}.stat-card.orange .num{color:var(--orange)}
-.tabs{display:flex;gap:0;border-bottom:1px solid var(--border)}
-.tab{padding:.7rem 1.2rem;font-size:.82rem;cursor:pointer;border-bottom:2px solid transparent;color:var(--text-dim);background:none;border-top:none;border-left:none;border-right:none;font-family:inherit}
-.tab:hover{color:var(--text)}.tab.active{color:var(--accent);border-bottom-color:var(--accent)}
-.tab-content{display:none;padding:1.25rem;background:var(--surface);border:1px solid var(--border);border-top:none;border-radius:0 0 12px 12px}
-.tab-content.active{display:block}
-.code-block{background:#0d0d15;border:1px solid var(--border);border-radius:8px;padding:1rem;font-family:var(--font);font-size:.78rem;line-height:1.7;overflow-x:auto;margin:.5rem 0;position:relative;white-space:pre-wrap}
-.code-block .comment{color:var(--text-dim)}.code-block .cmd{color:#fff}.code-block .highlight{color:var(--orange)}.code-block .str{color:var(--green)}.code-block .keyword{color:var(--accent)}
-.copy-btn{position:absolute;top:.5rem;right:.5rem;background:var(--surface2);border:1px solid var(--border);color:var(--text-dim);border-radius:4px;padding:.2rem .5rem;font-size:.6rem;cursor:pointer;font-family:var(--font);transition:all .15s}
-.copy-btn:hover{border-color:var(--accent);color:var(--accent)}
-.step{display:flex;gap:.75rem;margin-bottom:.75rem;align-items:flex-start}
-.step:last-child{margin-bottom:0}
-.step-num{flex-shrink:0;width:24px;height:24px;border-radius:6px;background:var(--accent);color:#fff;font-size:.7rem;font-weight:700;font-family:var(--font);display:flex;align-items:center;justify-content:center;margin-top:2px}
-.step-body{flex:1}
-.step-body h4{font-size:.85rem;color:#fff;margin-bottom:.15rem}
-.step-body p{font-size:.8rem;color:var(--text-dim);margin-bottom:.25rem}
-.info-box{background:var(--accent-dim);border:1px solid rgba(124,92,252,.2);border-radius:8px;padding:.75rem 1rem;font-size:.8rem;color:var(--text-dim);margin:.75rem 0}
-.info-box strong{color:var(--accent)}
+.progress-bar{display:none;height:4px;background:var(--surface2);border-radius:2px;margin:.75rem 0;overflow:hidden}
+.progress-bar.visible{display:block}
+.progress-fill{height:100%;width:0%;background:var(--accent);border-radius:2px;transition:width .3s}
+.status-bar{display:flex;align-items:center;gap:.5rem;padding:.5rem .75rem;border-radius:6px;font-size:.78rem;font-family:var(--font);margin:.5rem 0}
+.status-bar.ok{background:rgba(74,222,128,.08);color:var(--green)}
+.status-bar.err{background:rgba(248,113,113,.08);color:var(--red)}
+.status-bar.loading{background:rgba(96,165,250,.08);color:var(--blue)}
+.spinner{width:12px;height:12px;border:2px solid var(--blue);border-top-color:transparent;border-radius:50%;animation:spin .8s linear infinite;display:inline-block;vertical-align:middle;margin-right:.3rem}
+@keyframes spin{to{transform:rotate(360deg)}}
 .btn{display:inline-flex;align-items:center;gap:.5rem;padding:.45rem .9rem;border-radius:8px;font-size:.8rem;font-weight:600;border:none;cursor:pointer;transition:all .15s;font-family:inherit;margin-right:.4rem;margin-bottom:.4rem}
 .btn-primary{background:var(--accent);color:#fff}
 .btn-primary:hover{background:#8b6fff;box-shadow:0 0 20px var(--accent-dim)}
+.btn-green{background:var(--green);color:#000}
+.btn-green:hover{box-shadow:0 0 20px rgba(74,222,128,.3)}
 .btn-secondary{background:var(--surface2);color:var(--text);border:1px solid var(--border)}
 .btn-secondary:hover{border-color:var(--accent)}
-.btn-green{background:var(--green);color:#000}.btn-green:hover{box-shadow:0 0 20px rgba(74,222,128,.3)}
-.btn-orange{background:var(--orange);color:#000}.btn-orange:hover{box-shadow:0 0 20px rgba(251,146,60,.3)}
-@media(max-width:600px){.container{padding:1rem}.tab{padding:.5rem .8rem;font-size:.75rem}.stats-grid{grid-template-columns:repeat(2,1fr)}}
+.info-box{background:var(--accent-dim);border:1px solid rgba(124,92,252,.2);border-radius:8px;padding:.75rem 1rem;font-size:.8rem;color:var(--text-dim);margin:.75rem 0}
+.info-box strong{color:var(--accent)}
+.code-block{background:#0d0d15;border:1px solid var(--border);border-radius:8px;padding:1rem;font-family:var(--font);font-size:.78rem;line-height:1.7;overflow-x:auto;margin:.5rem 0;position:relative;white-space:pre-wrap}
+.code-block .cmd{color:#fff}.code-block .comment{color:var(--text-dim)}.code-block .highlight{color:var(--orange)}
+.copy-btn{position:absolute;top:.5rem;right:.5rem;background:var(--surface2);border:1px solid var(--border);color:var(--text-dim);border-radius:4px;padding:.2rem .5rem;font-size:.6rem;cursor:pointer;font-family:var(--font);transition:all .15s}
+.copy-btn:hover{border-color:var(--accent);color:var(--accent)}
+footer{text-align:center;padding:2rem 0;color:var(--text-dim);font-size:.75rem;border-top:1px solid var(--border);margin-top:2rem}
+footer a{color:var(--accent);text-decoration:none}
+@media(max-width:600px){.container{padding:1rem}.stats-grid{grid-template-columns:repeat(2,1fr)}}
 </style>
 </head>
 <body>
 <div class="container">
 <header>
   <div class="logo"><div class="logo-icon">🧠</div>MicroChat-CPU</div>
-  <p class="subtitle">Drag & drop your JSONL dataset — automatically convert, generate scripts, and download everything</p>
+  <p class="subtitle">Drag & drop your JSONL — converts to Parquet in-browser via Python WASM. One command to train.</p>
   <div class="badges">
     <a class="badge" href="https://github.com/Matrix-Research-Ai/MicroChat-CPU"><span class="badge-dot orange"></span> GitHub</a>
     <a class="badge" href="https://github.com/Matrix-Research-Ai/MicroChat-CPU/blob/master/README.md"><span class="badge-dot blue"></span> README</a>
-    <a class="badge" href="https://github.com/Matrix-Research-Ai/MicroChat-CPU/blob/master/WALKTHROUGH.md"><span class="badge-dot green"></span> Walkthrough</a>
   </div>
 </header>
 
 <div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
   <div class="icon">📂</div>
-  <div class="text">Drop your <strong>.jsonl</strong> dataset here or click to browse</div>
-  <div class="hint">Accepts Alpaca instruction, chat, or raw text format</div>
+  <div class="text">Drop your <strong>.jsonl</strong> dataset here</div>
+  <div class="hint">⏳ Loading Python engine on first file drop...</div>
   <div class="file-info" id="fileInfo"></div>
   <input type="file" id="fileInput" accept=".jsonl" onchange="handleFile(event)">
 </div>
 
+<div class="progress-bar" id="progressBar"><div class="progress-fill" id="progressFill"></div></div>
+<div class="status-bar" id="statusBar"><span id="statusText">Drop a JSONL file to start</span></div>
+
 <div class="section" id="sectionStats">
   <div class="section-title"><span class="arrow">▸</span> Dataset Stats</div>
   <div class="stats-grid" id="statsGrid"></div>
-  <div id="formatNote" style="font-size:.78rem;color:var(--text-dim);margin-top:.25rem;"></div>
 </div>
 
-<div class="section" id="sectionActions">
-  <div class="section-title"><span class="arrow">▸</span> One-Click Downloads</div>
-  <div id="downloadBtns" style="margin:.5rem 0;"></div>
-  <div class="info-box" id="autoParams" style="display:none;"><strong>⚡ Auto-params:</strong> <span id="autoParamsText"></span></div>
+<div class="section" id="sectionResults">
+  <div class="section-title"><span class="arrow">▸</span> Converted Files</div>
+  <div id="downloadBtns"></div>
+  <div class="info-box" id="autoParams"></div>
 </div>
 
-<div class="section" id="sectionGuide">
-  <div class="section-title"><span class="arrow">▸</span> Step-by-Step</div>
-  <div class="tabs">
-    <button class="tab active" onclick="switchTab(this,'tabPretrain')">🔄 Pretraining</button>
-    <button class="tab" onclick="switchTab(this,'tabSFT')">💬 SFT (Chat)</button>
-  </div>
-  <div class="tab-content active" id="tabPretrain">
-    <p style="font-size:.82rem;color:var(--text-dim);margin-bottom:.5rem;">Train a GPT model from scratch on raw text (next-token prediction).</p>
-    <div class="step"><div class="step-num">1</div><div class="step-body"><h4>Clone & install</h4>
-      <div class="code-block"><button class="copy-btn" onclick="copyText(this)">📋 Copy</button><span class="cmd">git clone https://github.com/Matrix-Research-Ai/MicroChat-CPU.git</span><br><span class="cmd">cd MicroChat-CPU</span><br><span class="cmd">uv sync --extra cpu && source .venv/bin/activate</span></div></div></div>
-    <div class="step"><div class="step-num">2</div><div class="step-body"><h4>Run conversion script</h4><p>Download & run <strong>prepare_pretrain.py</strong> from the buttons above:</p>
-      <div class="code-block"><button class="copy-btn" onclick="copyText(this)">📋 Copy</button>python3 prepare_pretrain.py</div></div></div>
-    <div class="step"><div class="step-num">3</div><div class="step-body"><h4>Copy to data dir & train</h4>
-      <div class="code-block" id="trainCmd"><button class="copy-btn" onclick="copyText(this)">📋 Copy</button><span class="comment"># Loading...</span></div></div></div>
-    <div class="step"><div class="step-num">4</div><div class="step-body"><h4>Chat</h4>
-      <div class="code-block"><button class="copy-btn" onclick="copyText(this)">📋 Copy</button>python -m scripts.chat_cli --model-tag=d<span id="depthDisplay">4</span></div></div></div>
-  </div>
-  <div class="tab-content" id="tabSFT">
-    <p style="font-size:.82rem;color:var(--text-dim);margin-bottom:.5rem;">Fine-tune an existing checkpoint on your data in chat format.</p>
-    <div class="step"><div class="step-num">1</div><div class="step-body"><h4>Clone & install</h4>
-      <div class="code-block"><button class="copy-btn" onclick="copyText(this)">📋 Copy</button><span class="cmd">git clone https://github.com/Matrix-Research-Ai/MicroChat-CPU.git</span><br><span class="cmd">cd MicroChat-CPU</span><br><span class="cmd">uv sync --extra cpu && source .venv/bin/activate</span></div></div></div>
-    <div class="step"><div class="step-num">2</div><div class="step-body"><h4>Download SFT chat JSONL</h4><p>Download <strong>sft_data.jsonl</strong> from the buttons above and place it in MicroChat-CPU folder.</p></div></div>
-    <div class="step"><div class="step-num">3</div><div class="step-body"><h4>Auto-patch chat_sft.py</h4><p>Download & run the <strong>patch_sft.py</strong> script from the buttons above:</p>
-      <div class="code-block"><button class="copy-btn" onclick="copyText(this)">📋 Copy</button>python3 patch_sft.py</div></div></div>
-    <div class="step"><div class="step-num">4</div><div class="step-body"><h4>Run SFT</h4>
-      <div class="code-block"><button class="copy-btn" onclick="copyText(this)">📋 Copy</button>python -m scripts.chat_sft --device-type=cpu --num-iterations=100</div></div></div>
-  </div>
+<div class="section" id="sectionTrain">
+  <div class="section-title"><span class="arrow">▸</span> One Command to Train</div>
+  <p style="font-size:.82rem;color:var(--text-dim);margin-bottom:.5rem;">Copy the downloaded <strong>.parquet</strong> files to MicroChat-CPU's data dir, then run:</p>
+  <div class="code-block" id="trainCmd"><button class="copy-btn" onclick="copyText(this)">📋 Copy</button><span class="comment"># Drop a dataset first</span></div>
 </div>
 
 <div class="section" id="sectionSmoke">
   <div class="section-title"><span class="arrow">▸</span> Quick Smoke Test</div>
   <div class="code-block"><button class="copy-btn" onclick="copyText(this)">📋 Copy</button><span class="highlight">python -m scripts.cpu_train --synthetic --dry-run --depth=2</span></div>
-  <p style="font-size:.78rem;color:var(--text-dim);margin-top:.3rem;">If this passes in 2 seconds, everything is installed.</p>
 </div>
 
-<footer><p><a href="https://github.com/Matrix-Research-Ai/MicroChat-CPU">GitHub</a> · <a href="https://github.com/Matrix-Research-Ai/MicroChat-CPU/blob/master/README.md">README</a> · <a href="https://github.com/Matrix-Research-Ai/MicroChat-CPU/blob/master/WALKTHROUGH.md">Walkthrough</a> · <a href="https://github.com/Matrix-Research-Ai">Matrix Research AI</a></p></footer>
+<footer><p><a href="https://github.com/Matrix-Research-Ai/MicroChat-CPU">GitHub</a> · <a href="https://github.com/Matrix-Research-Ai/MicroChat-CPU/blob/master/README.md">README</a></p></footer>
 </div>
 
 <script>
-let dataset = null;
+let pyodide = null, dataset = null, pyReady = false;
 
 function handleFile(e) { if (e.target.files[0]) loadFile(e.target.files[0]); }
 
@@ -146,264 +124,178 @@ zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add(
 zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
 zone.addEventListener('drop', e => { e.preventDefault(); zone.classList.remove('dragover'); if (e.dataTransfer.files.length && e.dataTransfer.files[0].name.endsWith('.jsonl')) loadFile(e.dataTransfer.files[0]); });
 
+async function initPyodide() {
+  if (pyReady) return;
+  setStatus('loading', '⏳ Loading Python engine (first load ~5s)...');
+  showProgress(10);
+  try {
+    pyodide = await loadPyodide({ indexURL: 'https://cdn.jsdelivr.net/pyodide/v0.26.4/full/' });
+    await pyodide.loadPackage(['micropip']);
+    const micropip = pyodide.pyimport('micropip');
+    await micropip.install(['pyarrow']);
+    showProgress(50);
+    // Register the convert function
+    pyodide.runPython(`
+import json, pyarrow as pa, pyarrow.parquet as pq, io, base64
+
+def convert_to_parquet(jsonl_text, file_id):
+    lines = [json.loads(l) for l in jsonl_text.split('\\n') if l.strip()]
+    texts = [l.get('response') or l.get('text') or '' for l in lines if l.get('response') or l.get('text')]
+    split = int(len(texts) * 0.95) or len(texts) - 1
+    
+    result = {}
+    for name, chunk in [('train', texts[:split]), ('val', texts[split:])]:
+        table = pa.table({'text': pa.array(chunk)})
+        buf = pa.BufferOutputStream()
+        pq.write_table(table, buf)
+        result[name] = base64.b64encode(bytes(buf.getvalue())).decode()
+        result[name + '_rows'] = len(chunk)
+    return json.dumps(result)
+
+def convert_to_sft(jsonl_text):
+    lines = [json.loads(l) for l in jsonl_text.split('\\n') if l.strip()]
+    out = []
+    for l in lines:
+        if 'instruction' in l and 'response' in l:
+            user_msg = l['instruction'] + ('\\n' + l['input'] if l.get('input') else '')
+            out.append(json.dumps([{'role':'user','content':user_msg},{'role':'assistant','content':l['response']}], ensure_ascii=False))
+        elif 'messages' in l:
+            out.append(json.dumps(l['messages'], ensure_ascii=False))
+        elif 'text' in l:
+            out.append(json.dumps([{'role':'user','content':'Study this:'},{'role':'assistant','content':l['text']}], ensure_ascii=False))
+    return '\\n'.join(out)
+`);
+    pyReady = true;
+    showProgress(100);
+    setStatus('ok', '✓ Python engine ready');
+    document.querySelector('.hint').textContent = 'Accepts Alpaca instruction, chat, or raw text format';
+  } catch (e) {
+    setStatus('err', '✗ Failed to load Python engine: ' + e.message);
+    console.error(e);
+  }
+}
+
 async function loadFile(file) {
   try {
-  const text = await file.text();
-  const lines = text.split('\n').filter(l => l.trim());
-  const data = [];
-  let parseErrors = 0;
-  for (const l of lines) {
-    try { data.push(JSON.parse(l)); }
-    catch(e) { parseErrors++; console.warn('Bad JSONL line:', l.slice(0,80)); }
-  }
-  if (data.length === 0) { alert('No valid JSON lines found in file'); return; }
-  dataset = data;
-  zone.classList.add('has-file');
-  document.getElementById('fileInfo').textContent = `📄 ${file.name}  (${file.size.toLocaleString()} bytes, ${data.length} rows)`;
+    await initPyodide();
+    setStatus('loading', '⏳ Reading file...');
+    showProgress(20);
 
-  // Detect format
-  const keys = Object.keys(data[0]);
-  let fmt = 'unknown';
-  if (keys.includes('instruction') && keys.includes('response')) fmt = 'instruction';
-  else if (keys.includes('messages')) fmt = 'chat';
-  else if (keys.includes('text')) fmt = 'pretrain';
-  else if (Array.isArray(data[0]) && data[0][0]?.role) fmt = 'chat_array';
+    const text = await file.text();
+    const lines = text.split('\n').filter(l => l.trim());
+    const data = [];
+    for (const l of lines) {
+      try { data.push(JSON.parse(l)); } catch(e) {}
+    }
+    if (data.length === 0) { setStatus('err', 'No valid JSON lines found'); return; }
+    dataset = data;
 
-  // Show sections
-  ['sectionStats','sectionActions','sectionGuide','sectionSmoke'].forEach(id =>
-    document.getElementById(id).classList.add('visible'));
+    zone.classList.add('has-file');
+    document.getElementById('fileInfo').textContent = `📄 ${file.name}  (${data.length} rows)`;
 
-  // Stats
-  const quals = data.filter(d => d.quality_score != null).map(d => d.quality_score);
-  const toks = data.filter(d => d.est_tokens != null).map(d => d.est_tokens);
-  const chars = data.filter(d => d.response || d.text).map(d => (d.response || d.text).length);
-  const chapters = new Set(data.filter(d => d.chapter).map(d => d.chapter)).size;
-  const totalTokens = toks.length ? toks.reduce((a,b)=>a+b,0) : 0;
-  const avgTokens = toks.length ? Math.round(toks.reduce((a,b)=>a+b,0)/toks.length) : 0;
-  const totalChars = chars.length ? chars.reduce((a,b)=>a+b,0) : 0;
+    // Stats
+    const quals = data.filter(d => d.quality_score != null).map(d => d.quality_score);
+    const toks = data.filter(d => d.est_tokens != null).map(d => d.est_tokens);
+    const chars = data.filter(d => d.response || d.text).map(d => (d.response || d.text).length);
+    const chapters = new Set(data.filter(d => d.chapter).map(d => d.chapter)).size;
+    const totalTokens = toks.length ? toks.reduce((a,b)=>a+b,0) : 0;
+    const avgTokens = toks.length ? Math.round(toks.reduce((a,b)=>a+b,0)/toks.length) : 0;
+    const totalChars = chars.length ? chars.reduce((a,b)=>a+b,0) : 0;
 
-  document.getElementById('statsGrid').innerHTML = `
-    <div class="stat-card accent"><div class="num">${data.length.toLocaleString()}</div><div class="label">Examples</div></div>
-    <div class="stat-card green"><div class="num">${quals.length ? (quals.reduce((a,b)=>a+b,0)/quals.length).toFixed(2) : '—'}</div><div class="label">Avg Quality</div></div>
-    <div class="stat-card blue"><div class="num">${totalTokens.toLocaleString()}</div><div class="label">Tokens</div></div>
-    <div class="stat-card orange"><div class="num">${(totalChars/1000).toFixed(1)}K</div><div class="label">Characters</div></div>
-    <div class="stat-card accent"><div class="num">${chapters || '—'}</div><div class="label">Chapters</div></div>
-    <div class="stat-card blue"><div class="num">${avgTokens}</div><div class="label">Avg Tok/Chunk</div></div>`;
+    document.getElementById('sectionStats').classList.add('visible');
+    document.getElementById('sectionResults').classList.add('visible');
+    document.getElementById('sectionTrain').classList.add('visible');
+    document.getElementById('sectionSmoke').classList.add('visible');
 
-  const fmtNames = {instruction:'Alpaca Instruction',chat:'Chat (messages[])',chat_array:'Chat Array',pretrain:'Raw Text',unknown:'Unknown'};
-  document.getElementById('formatNote').textContent = `Detected format: ${fmtNames[fmt] || fmt}`;
+    document.getElementById('statsGrid').innerHTML = `
+      <div class="stat-card accent"><div class="num">${data.length.toLocaleString()}</div><div class="label">Examples</div></div>
+      <div class="stat-card green"><div class="num">${quals.length ? (quals.reduce((a,b)=>a+b,0)/quals.length).toFixed(2) : '—'}</div><div class="label">Avg Quality</div></div>
+      <div class="stat-card blue"><div class="num">${totalTokens.toLocaleString()}</div><div class="label">Tokens</div></div>
+      <div class="stat-card orange"><div class="num">${(totalChars/1000).toFixed(1)}K</div><div class="label">Chars</div></div>
+      <div class="stat-card accent"><div class="num">${chapters || '—'}</div><div class="label">Chapters</div></div>
+      <div class="stat-card blue"><div class="num">${avgTokens}</div><div class="label">Avg Tok/Chunk</div></div>`;
 
-  // Auto-compute depth and params
-  const depth = totalTokens < 200000 ? 2 : totalTokens < 500000 ? 4 : totalTokens < 2000000 ? 6 : 8;
-  const maxSeqLen = Math.min(2048, Math.max(256, avgTokens * 2));
-  const totalBatch = Math.min(2048, Math.max(128, Math.round(totalTokens / data.length / 2)));
-  const numIter = Math.max(50, Math.round(totalTokens / totalBatch / 4));
-  document.getElementById('depthDisplay').textContent = depth;
-  document.getElementById('autoParamsText').textContent =
-    `depth=${depth}, max-seq-len=${maxSeqLen}, total-batch-size=${totalBatch}, num-iterations=${numIter}`;
-  document.getElementById('autoParams').style.display = 'block';
+    // Auto params
+    const depth = totalTokens < 200000 ? 2 : totalTokens < 500000 ? 4 : totalTokens < 2000000 ? 6 : 8;
+    const maxSeqLen = Math.min(2048, Math.max(256, avgTokens * 2));
+    const totalBatch = Math.min(2048, Math.max(128, Math.round(totalTokens / data.length / 2)));
+    const numIter = Math.max(50, Math.round(totalTokens / totalBatch));
 
-  // Training command
-  document.getElementById('trainCmd').innerHTML =
-    `<button class="copy-btn" onclick="copyText(this)">📋 Copy</button>` +
-    `<span class="comment"># Find data dir:</span><br>` +
-    `<span class="cmd">python3 -c "from nanochat.common import get_base_dir; print(get_base_dir())"</span><br><br>` +
-    `<span class="comment"># Copy converted parquet files there, then run:</span><br>` +
-    `<span class="cmd">bash runs/runcpu_distributed.sh single --depth=${depth} --num-iterations=${numIter} --max-seq-len=${maxSeqLen} --device-batch-size=1 --total-batch-size=${totalBatch}</span>`;
+    document.getElementById('autoParams').innerHTML = `<strong>⚡ Auto-params:</strong> depth=${depth}, max-seq-len=${maxSeqLen}, total-batch-size=${totalBatch}, num-iterations=${numIter}`;
 
-  // Generate downloadable scripts
-  generateDownloads(data, file.name, fmt, depth, maxSeqLen, totalBatch, numIter, totalTokens);
+    // Convert in-browser via Pyodide
+    setStatus('loading', '⏳ Converting to Parquet in-browser...');
+    showProgress(60);
 
-  // Console debug
-  console.log(`Dataset: ${data.length} rows, ${totalTokens} tokens, depth=${depth}, iters=${numIter}`);
-  } catch (e) {
-    console.error('loadFile error:', e);
-    alert('Error loading dataset: ' + e.message);
-  }
-}
+    const resultJson = pyodide.globals.get('convert_to_parquet')(text, 'dataset');
+    const result = JSON.parse(resultJson);
+    pyodide.globals.delete('convert_to_parquet');
 
-function generateDownloads(data, filename, fmt, depth, maxSeqLen, totalBatch, numIter, totalTokens) {
-  const container = document.getElementById('downloadBtns');
-  container.innerHTML = '';
-  const btns = [];
+    // Download buttons
+    const btns = document.getElementById('downloadBtns');
+    btns.innerHTML = '';
 
-  // Helper to create a download button
-  function addBtn(label, cls, content, fname) {
-    const btn = document.createElement('button');
-    btn.className = 'btn ' + cls;
-    btn.textContent = label;
-    btn.addEventListener('click', () => {
-      const blob = new Blob([content], {type:'application/octet-stream'});
+    // Decode base64 and create download blobs
+    function b64ToBlob(b64, name) {
+      const binary = atob(b64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      const blob = new Blob([bytes], {type:'application/octet-stream'});
+      const btn = document.createElement('button');
+      btn.className = 'btn btn-primary';
+      btn.textContent = `⬇ ${name} (${result[name+'_rows']} rows)`;
+      btn.addEventListener('click', () => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.href = url; a.download = name; a.click();
+        URL.revokeObjectURL(url);
+      });
+      btns.appendChild(btn);
+    }
+
+    b64ToBlob(result.train, 'train_data.parquet');
+    b64ToBlob(result.val, 'val_data.parquet');
+
+    // SFT download
+    const sftResult = pyodide.globals.get('convert_to_sft')(text);
+    pyodide.globals.delete('convert_to_sft');
+    const sftBtn = document.createElement('button');
+    sftBtn.className = 'btn btn-green';
+    sftBtn.textContent = '⬇ sft_data.jsonl';
+    sftBtn.addEventListener('click', () => {
+      const blob = new Blob([sftResult], {type:'application/octet-stream'});
       const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = fname; a.click();
+      const a = document.createElement('a'); a.href = url; a.download = 'sft_data.jsonl'; a.click();
       URL.revokeObjectURL(url);
     });
-    container.appendChild(btn);
+    btns.appendChild(sftBtn);
+
+    showProgress(100);
+    setStatus('ok', `✓ Converted ${result.train_rows + result.val_rows} rows to Parquet. Download + run one command.`);
+
+    // Training command
+    document.getElementById('trainCmd').innerHTML =
+      `<button class="copy-btn" onclick="copyText(this)">📋 Copy</button>` +
+      `<span class="comment"># 1. Find MicroChat-CPU's data directory:</span><br>` +
+      `<span class="cmd">python3 -c "from nanochat.common import get_base_dir; print(get_base_dir())"</span><br><br>` +
+      `<span class="comment"># 2. Copy downloaded .parquet files there</span><br><br>` +
+      `<span class="comment"># 3. Train:</span><br>` +
+      `<span class="highlight">bash runs/runcpu_distributed.sh single --depth=${depth} --num-iterations=${numIter} --max-seq-len=${maxSeqLen} --device-batch-size=1 --total-batch-size=${totalBatch}</span>`;
+
+  } catch (e) {
+    setStatus('err', '✗ Error: ' + e.message);
+    console.error(e);
   }
-
-  // 1. Pretrain conversion script
-  const pretrainPy = `#!/usr/bin/env python3
-"""Auto-generated by MicroChat-CPU training guide. Converts JSONL to Parquet for pretraining."""
-import json, os, math
-try:
-    import pyarrow as pa, pyarrow.parquet as pq
-except ImportError:
-    print("Installing pyarrow...")
-    os.system("pip install pyarrow pandas")
-    import pyarrow as pa, pyarrow.parquet as pq
-
-with open("${filename}", encoding="utf-8") as f:
-    lines = [json.loads(l) for l in f if l.strip()]
-
-texts = [l.get("response") or l.get("text") or "" for l in lines if l.get("response") or l.get("text")]
-print(f"Extracted {len(texts)} text passages, {sum(len(t) for t in texts):,} chars")
-
-out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "microchat_data")
-os.makedirs(out, exist_ok=True)
-
-split = int(len(texts) * 0.95)
-for name, chunk in [("shard_00000", texts[:split]), ("shard_00001", texts[split:])]:
-    pq.write_table(pa.table({"text": pa.array(chunk)}), f"{out}/{name}.parquet")
-    print(f"Wrote {out}/{name}.parquet ({len(chunk)} rows)")
-
-print(f"\\nDone. Now copy to MicroChat-CPU data dir:")
-print(f"  cp {out}/shard_*.parquet /path/to/base_data_climbmix/")
-print(f"\\nThen train:")
-print(f"  bash runs/runcpu_distributed.sh single --depth=${depth} --num-iterations=${numIter} --max-seq-len=${maxSeqLen} --device-batch-size=1 --total-batch-size=${totalBatch}")
-`;
-  addBtn('⬇ prepare_pretrain.py', 'btn-primary', pretrainPy, 'prepare_pretrain.py');
-
-  // 2. SFT chat JSONL (generated in-browser)
-  if (fmt === 'instruction') {
-    const chatLines = data.map(l => {
-      const userMsg = l.input ? l.instruction + '\\n' + l.input : l.instruction;
-      return JSON.stringify([{role:"user",content:userMsg},{role:"assistant",content:l.response}]);
-    }).join('\n');
-    addBtn('⬇ sft_data.jsonl', 'btn-green', chatLines, 'sft_data.jsonl');
-  } else {
-    const chatLines = data.map(l => {
-      const text = l.response || l.text || JSON.stringify(l);
-      return JSON.stringify([{role:"user",content:"Study the following passage:"},{role:"assistant",content:text}]);
-    }).join('\n');
-    addBtn('⬇ sft_data.jsonl', 'btn-green', chatLines, 'sft_data.jsonl');
-  }
-
-  // 3. Auto-patch script for chat_sft.py
-  const patchPy = `#!/usr/bin/env python3
-"""Auto-generated: patches MicroChat-CPU's scripts/chat_sft.py to add your CustomJSON dataset."""
-import os, re
-
-sft_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sft_data.jsonl")
-assert os.path.exists(sft_path), f"sft_data.jsonl not found at {sft_path}"
-
-chat_sft = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts", "chat_sft.py")
-if not os.path.exists(chat_sft):
-    chat_sft = os.path.join(os.path.dirname(os.path.abspath(__file__)), "MicroChat-CPU", "scripts", "chat_sft.py")
-if not os.path.exists(chat_sft):
-    print(f"ERROR: chat_sft.py not found. Searched: {chat_sft}")
-    exit(1)
-
-with open(chat_sft, "r") as f:
-    code = f.read()
-
-# Check if already patched
-if "CustomJSON(filepath=" in code and "encyclopedia_sft" not in code:
-    print("Already patched with a CustomJSON entry. Skipping.")
-    exit(0)
-
-# Find train_tasks opening bracket
-match = re.search(r'train_tasks\\s*=\\s*\\[', code)
-if not match:
-    print("ERROR: Could not find train_tasks = [ in chat_sft.py")
-    exit(1)
-
-pos = match.end()
-insert = '\\n    CustomJSON(filepath=r"' + sft_path + '"),  # auto-added'
-code = code[:pos] + insert + code[pos:]
-
-# Also ensure import exists
-if "from tasks.customjson import CustomJSON" not in code:
-    code = code.replace(
-        "from tasks.gsm8k import GSM8K",
-        "from tasks.gsm8k import GSM8K\\nfrom tasks.customjson import CustomJSON"
-    )
-
-with open(chat_sft, "w") as f:
-    f.write(code)
-print(f"Patched {chat_sft} - added CustomJSON dataset")
-print(f"  filepath: {sft_path}")
-print(f"\\nNow run: python -m scripts.chat_sft --device-type=cpu --num-iterations=100")
-`;
-  addBtn('⬇ patch_sft.py', 'btn-orange', patchPy, 'patch_sft.py');
-
-  // 4. Full training launch script
-  const launchSh = `#!/usr/bin/env bash
-# Auto-generated by MicroChat-CPU training guide
-# Run: bash train.sh
-
-set -e
-
-# 1. Install if needed
-if [ ! -d "MicroChat-CPU" ]; then
-    git clone https://github.com/Matrix-Research-Ai/MicroChat-CPU.git
-fi
-cd MicroChat-CPU
-
-# 2. Activate venv
-if [ ! -d ".venv" ]; then
-    uv sync --extra cpu
-fi
-source .venv/bin/activate 2>/dev/null || source .venv/Scripts/activate 2>/dev/null || true
-
-# 3. Convert dataset (if prepare_pretrain.py is present)
-if [ -f "../prepare_pretrain.py" ]; then
-    python3 ../prepare_pretrain.py
-fi
-
-# 4. Train
-echo "Starting training..."
-python -m scripts.cpu_train --depth=${depth} --num-iterations=${numIter} --max-seq-len=${maxSeqLen} --device-batch-size=1 --total-batch-size=${totalBatch} --eval-tokens=0 --core-metric-every=-1
-
-echo "Done! Chat with: python -m scripts.chat_cli --model-tag=d${depth}"
-`;
-  addBtn('⬇ train.sh', 'btn-secondary', launchSh, 'train.sh');
 }
 
-function generateChatJSONL() {
-  return dataset.map(l => {
-    const text = l.response || l.text || JSON.stringify(l);
-    return JSON.stringify([{role:"user",content:"Study the following passage:"},{role:"assistant",content:text}]);
-  }).join('\n');
+function showProgress(pct) {
+  document.getElementById('progressBar').classList.add('visible');
+  document.getElementById('progressFill').style.width = pct + '%';
 }
-
-function downloadStr(content, filename) {
-  const blob = new Blob([content], {type:'application/octet-stream'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = filename; a.click();
-  URL.revokeObjectURL(url);
+function setStatus(cls, msg) {
+  const bar = document.getElementById('statusBar');
+  bar.className = 'status-bar ' + cls;
+  document.getElementById('statusText').textContent = msg;
 }
-
-function downloadPy(content, filename) {
-  const blob = new Blob([content], {type:'text/x-python'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = filename; a.click();
-  URL.revokeObjectURL(url);
-}
-
-function escapeHtml(s) {
-  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
-
-function switchTab(el, id) {
-  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-  el.classList.add('active');
-  document.getElementById(id).classList.add('active');
-}
-
 function copyText(btn) {
   const block = btn.closest('.code-block');
   let text = block.textContent.replace('📋 Copy', '').trim();
@@ -411,14 +303,12 @@ function copyText(btn) {
   const done = () => { btn.textContent = '✓ Copied!'; setTimeout(() => { btn.textContent = orig; }, 2000); };
   if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, btn, orig));
-  } else {
-    fallbackCopy(text, btn, orig);
-  }
+  } else fallbackCopy(text, btn, orig);
 }
 function fallbackCopy(text, btn, orig) {
   const saved = document.activeElement;
-  const ta = document.createElement('textarea');
-  ta.value = text; ta.style.cssText = 'position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0';
+  const ta = document.createElement('textarea'); ta.value = text;
+  ta.style.cssText = 'position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0';
   document.body.appendChild(ta); ta.focus(); ta.setSelectionRange(0, text.length);
   document.execCommand('copy'); document.body.removeChild(ta);
   if (saved && saved.focus) saved.focus();
