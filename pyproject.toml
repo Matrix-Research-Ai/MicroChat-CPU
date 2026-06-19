@@ -1,7 +1,7 @@
 [project]
-name = "nanochat"
+name = "microchat-cpu"
 version = "0.1.0"
-description = "the minimal full-stack ChatGPT clone"
+description = "Distributed CPU-only LLM training — fork of karpathy/nanochat. Gloo DDP, FSDP, gradient compression, topology-aware hierarchical AllReduce, async overlap, heterogeneous node support."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

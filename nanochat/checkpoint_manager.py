@@ -10,8 +10,9 @@ import torch
 
 from nanochat.common import get_base_dir
 from nanochat.gpt import GPT, GPTConfig
-from nanochat.tokenizer import get_tokenizer
 from nanochat.common import setup_default_logging
+
+# Import tokenizer lazily (only needed for checkpoint metadata, optional dep)
 
 # Set up logging
 setup_default_logging()
@@ -109,6 +110,7 @@ def build_model(checkpoint_dir, step, device, phase):
     else:
         model.train()
     # Load the Tokenizer
+    from nanochat.tokenizer import get_tokenizer
     tokenizer = get_tokenizer()
     # Sanity check: compatibility between model and tokenizer
     assert tokenizer.get_vocab_size() == model_config_kwargs["vocab_size"], f"Tokenizer vocab size {tokenizer.get_vocab_size()} does not match model config vocab size {model_config_kwargs['vocab_size']}"

@@ -18,7 +18,32 @@ Good old AdamW optimizer, fused kernel.
 https://arxiv.org/abs/1711.05101
 """
 
-@torch.compile(dynamic=False, fullgraph=True)
+# Conditionally compile the fused step kernels.
+# torch.compile requires a C++ compiler on CPU (cl.exe on Windows).
+# When unavailable, fall back to eager mode (slower but works everywhere).
+_compile_available = torch.cuda.is_available()
+if not _compile_available:
+    # On CPU: check if a C++ compiler exists for torch.compile
+    import shutil
+    if shutil.which("cl") or shutil.which("g++") or shutil.which("c++"):
+        # Compiler found — try compile
+        try:
+            @torch.compile
+            def _compile_check(x): return x
+            _compile_check(torch.tensor(1))
+            _compile_available = True
+        except Exception:
+            _compile_available = False
+    else:
+        _compile_available = False
+
+def _maybe_compile(fn):
+    """Decorator: apply torch.compile if available, else no-op."""
+    if _compile_available:
+        return torch.compile(fn, dynamic=False, fullgraph=True)
+    return fn
+
+@_maybe_compile
 def adamw_step_fused(
     p: Tensor,              # (32768, 768) - parameter tensor
     grad: Tensor,           # (32768, 768) - gradient, same shape as p
@@ -88,7 +113,7 @@ polar_express_coeffs = [
     (2.3465413258596377, -1.7097828382687081, 0.42323551169305323),
 ]
 
-@torch.compile(dynamic=False, fullgraph=True)
+@_maybe_compile
 def muon_step_fused(
     stacked_grads: Tensor,          # (12, 768, 3072) - stacked gradients
     stacked_params: Tensor,         # (12, 768, 3072) - stacked parameters
