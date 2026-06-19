@@ -34,7 +34,6 @@ import torch.distributed as dist
 import torch.nn as nn
 
 from nanochat.gpt import GPT, GPTConfig
-from nanochat.dataloader import tokenizing_distributed_data_loader_bos_bestfit, tokenizing_distributed_data_loader_with_state_bos_bestfit
 from nanochat.common import compute_init, compute_cleanup, print0, DummyWandb, print_banner, get_base_dir, autodetect_device_type, get_peak_flops, COMPUTE_DTYPE, COMPUTE_DTYPE_REASON, is_ddp_initialized
 from nanochat.checkpoint_manager import save_checkpoint, load_checkpoint
 from nanochat.loss_eval import evaluate_bpb
@@ -63,6 +62,18 @@ def _synth_val_loader(vocab_size=50304, B=2, T=128, device="cpu", num_batches=10
                                  device=device, num_batches=num_batches)
     for x, y, _ in loader:
         yield x, y
+
+
+def _lazy_dataloader():
+    """Lazy import of dataloader (needs pyarrow, not needed for synthetic)."""
+    from nanochat.dataloader import (
+        tokenizing_distributed_data_loader_bos_bestfit,
+        tokenizing_distributed_data_loader_with_state_bos_bestfit,
+    )
+    return (
+        tokenizing_distributed_data_loader_bos_bestfit,
+        tokenizing_distributed_data_loader_with_state_bos_bestfit,
+    )
 
 print_banner()
 
@@ -420,11 +431,12 @@ if args.synthetic:
     if master_process:
         print0("✓ Using synthetic data (no dataset download needed)")
 else:
-    train_loader = tokenizing_distributed_data_loader_with_state_bos_bestfit(
+    _dd = _lazy_dataloader()
+    train_loader = _dd[1](  # tokenizing_distributed_data_loader_with_state_bos_bestfit
         tokenizer, args.device_batch_size, args.max_seq_len,
         split="train", device=device,
     )
-    build_val_loader = lambda: tokenizing_distributed_data_loader_bos_bestfit(
+    build_val_loader = lambda: _dd[0](  # tokenizing_distributed_data_loader_bos_bestfit
         tokenizer, args.device_batch_size, args.max_seq_len,
         split="val", device=device,
     )
