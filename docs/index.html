@@ -134,37 +134,7 @@ async function initPyodide() {
     const micropip = pyodide.pyimport('micropip');
     await micropip.install(['pyarrow']);
     showProgress(50);
-    // Register the convert function
-    pyodide.runPython(`
-import json, pyarrow as pa, pyarrow.parquet as pq, io, base64
 
-def convert_to_parquet(jsonl_text, file_id):
-    lines = [json.loads(l) for l in jsonl_text.split('\\n') if l.strip()]
-    texts = [l.get('response') or l.get('text') or '' for l in lines if l.get('response') or l.get('text')]
-    split = int(len(texts) * 0.95) or len(texts) - 1
-    
-    result = {}
-    for name, chunk in [('train', texts[:split]), ('val', texts[split:])]:
-        table = pa.table({'text': pa.array(chunk)})
-        buf = pa.BufferOutputStream()
-        pq.write_table(table, buf)
-        result[name] = base64.b64encode(bytes(buf.getvalue())).decode()
-        result[name + '_rows'] = len(chunk)
-    return json.dumps(result)
-
-def convert_to_sft(jsonl_text):
-    lines = [json.loads(l) for l in jsonl_text.split('\\n') if l.strip()]
-    out = []
-    for l in lines:
-        if 'instruction' in l and 'response' in l:
-            user_msg = l['instruction'] + ('\\n' + l['input'] if l.get('input') else '')
-            out.append(json.dumps([{'role':'user','content':user_msg},{'role':'assistant','content':l['response']}], ensure_ascii=False))
-        elif 'messages' in l:
-            out.append(json.dumps(l['messages'], ensure_ascii=False))
-        elif 'text' in l:
-            out.append(json.dumps([{'role':'user','content':'Study this:'},{'role':'assistant','content':l['text']}], ensure_ascii=False))
-    return '\\n'.join(out)
-`);
     pyReady = true;
     showProgress(100);
     setStatus('ok', '✓ Python engine ready');
@@ -227,50 +197,76 @@ async function loadFile(file) {
     setStatus('loading', '⏳ Converting to Parquet in-browser...');
     showProgress(60);
 
-    const resultJson = pyodide.globals.get('convert_to_parquet')(text, 'dataset');
-    const result = JSON.parse(resultJson);
-    pyodide.globals.delete('convert_to_parquet');
+    // Write JSONL to virtual FS
+    pyodide.FS.writeFile('/tmp/dataset.jsonl', text);
+
+    // Run conversion in Python, write parquet to FS
+    pyodide.runPython(`
+import json, pyarrow as pa, pyarrow.parquet as pq, base64
+
+with open('/tmp/dataset.jsonl') as f:
+    lines = [json.loads(l) for l in f if l.strip()]
+texts = [l.get('response') or l.get('text') or '' for l in lines if l.get('response') or l.get('text')]
+split = int(len(texts) * 0.95) or max(len(texts) - 1, 1)
+for name, chunk in [('train', texts[:split]), ('val', texts[split:])]:
+    pq.write_table(pa.table({'text': pa.array(chunk)}), f'/tmp/{name}.parquet')
+print(f"Wrote train ({len(texts[:split])}) and val ({len(texts[split:])}) parquet files")
+`);
+
+    // Read back from FS
+    function fsReadB64(path) {
+      const data = pyodide.FS.readFile(path);
+      const bytes = new Uint8Array(data);
+      let binary = '';
+      for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+      return binary;
+    }
+
+    const trainBytes = fsReadB64('/tmp/train.parquet');
+    const valBytes = fsReadB64('/tmp/val.parquet');
+    const trainRows = text.split('\n').filter(l => l.trim()).length;
+
+    // Convert to SFT chat format (return result directly)
+    const sftJsonl = pyodide.runPython(`
+import json
+with open('/tmp/dataset.jsonl') as f:
+    lines = [json.loads(l) for l in f if l.strip()]
+out = []
+for l in lines:
+    if 'instruction' in l and 'response' in l:
+        user_msg = (l['instruction'] + '\\n' + l['input']) if l.get('input') else l['instruction']
+        out.append(json.dumps([{'role':'user','content':user_msg},{'role':'assistant','content':l['response']}], ensure_ascii=False))
+    elif 'messages' in l:
+        out.append(json.dumps(l['messages'], ensure_ascii=False))
+    elif 'text' in l:
+        out.append(json.dumps([{'role':'user','content':'Study this:'},{'role':'assistant','content':l['text']}], ensure_ascii=False))
+'\\n'.join(out)
+`);
 
     // Download buttons
     const btns = document.getElementById('downloadBtns');
     btns.innerHTML = '';
 
-    // Decode base64 and create download blobs
-    function b64ToBlob(b64, name) {
-      const binary = atob(b64);
-      const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-      const blob = new Blob([bytes], {type:'application/octet-stream'});
+    function makeDownloadBtn(label, cls, data, filename) {
+      const blob = new Blob([data], {type:'application/octet-stream'});
       const btn = document.createElement('button');
-      btn.className = 'btn btn-primary';
-      btn.textContent = `⬇ ${name} (${result[name+'_rows']} rows)`;
+      btn.className = 'btn ' + cls;
+      btn.textContent = label;
       btn.addEventListener('click', () => {
         const url = URL.createObjectURL(blob);
-        const a = document.createElement('a'); a.href = url; a.download = name; a.click();
+        const a = document.createElement('a'); a.href = url; a.download = filename; a.click();
         URL.revokeObjectURL(url);
       });
       btns.appendChild(btn);
     }
 
-    b64ToBlob(result.train, 'train_data.parquet');
-    b64ToBlob(result.val, 'val_data.parquet');
-
-    // SFT download
-    const sftResult = pyodide.globals.get('convert_to_sft')(text);
-    pyodide.globals.delete('convert_to_sft');
-    const sftBtn = document.createElement('button');
-    sftBtn.className = 'btn btn-green';
-    sftBtn.textContent = '⬇ sft_data.jsonl';
-    sftBtn.addEventListener('click', () => {
-      const blob = new Blob([sftResult], {type:'application/octet-stream'});
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a'); a.href = url; a.download = 'sft_data.jsonl'; a.click();
-      URL.revokeObjectURL(url);
-    });
-    btns.appendChild(sftBtn);
+    const valRows = Math.round(trainRows * 0.05);
+    makeDownloadBtn(`⬇ train_data.parquet (${trainRows - valRows} rows)`, 'btn-primary', new Uint8Array([...trainBytes].map(c=>c.charCodeAt(0))), 'train_data.parquet');
+    makeDownloadBtn(`⬇ val_data.parquet (${valRows} rows)`, 'btn-primary', new Uint8Array([...valBytes].map(c=>c.charCodeAt(0))), 'val_data.parquet');
+    makeDownloadBtn('⬇ sft_data.jsonl', 'btn-green', sftJsonl, 'sft_data.jsonl');
 
     showProgress(100);
-    setStatus('ok', `✓ Converted ${result.train_rows + result.val_rows} rows to Parquet. Download + run one command.`);
+    setStatus('ok', `✓ Converted ${trainRows} rows to Parquet. Download + run one command.`);
 
     // Training command
     document.getElementById('trainCmd').innerHTML =
