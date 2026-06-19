@@ -269,13 +269,14 @@ REM Put this .bat and dataset.jsonl in same folder, then double-click
 
 set MICROCHAT_DIR=${mcPath}
 set DATASET_PATH=%~dp0dataset.jsonl
+set DATASET_PATH=%DATASET_PATH:\=/%
 
 echo === Step 1: Find MicroChat-CPU ===
 if exist "%MICROCHAT_DIR%" (
     echo Using existing: %MICROCHAT_DIR%
     cd /d "%MICROCHAT_DIR%"
 ) else if exist "MicroChat-CPU" (
-    echo Using existing: %CD%\\MicroChat-CPU
+    echo Using existing: %CD%/MicroChat-CPU
     cd MicroChat-CPU
 ) else (
     echo Cloning MicroChat-CPU...
@@ -284,7 +285,12 @@ if exist "%MICROCHAT_DIR%" (
 )
 
 echo === Step 1b: Install dependencies ===
-uv sync --extra cpu
+if exist ".venv" (
+    echo Found .venv, activating...
+) else (
+    echo Creating venv with uv...
+    uv sync --extra cpu || pip install torch numpy pyarrow tiktoken rustbpe
+)
 
 echo === Step 2: Convert JSONL to Parquet ===
 python3 -c "import json,os,pyarrow as pa,pyarrow.parquet as pq; lines=[json.loads(l) for l in open('%DATASET_PATH%',encoding='utf-8') if l.strip()]; texts=[l.get('response') or l.get('text') or '' for l in lines if l.get('response') or l.get('text')]; split=int(len(texts)*0.95) or max(len(texts)-1,1); out=os.path.join(os.path.dirname(os.path.abspath(__file__)),'microchat_data'); os.makedirs(out,exist_ok=True); [pq.write_table(pa.table({'text':pa.array(chunk)}),os.path.join(out,f'{name}.parquet')) or print(f'Wrote {name}.parquet ({len(chunk)} rows)') for name,chunk in [('shard_00000',texts[:split]),('shard_00001',texts[split:])]]"
@@ -322,7 +328,12 @@ else
     cd MicroChat-CPU
 fi
 echo "=== Install dependencies ==="
-uv sync --extra cpu
+if [ -d ".venv" ]; then
+    echo "Found .venv, activating..."
+else
+    echo "Creating venv with uv..."
+    uv sync --extra cpu || pip install torch numpy pyarrow tiktoken rustbpe
+fi
 source .venv/bin/activate 2>/dev/null || source .venv/Scripts/activate 2>/dev/null || true
 python3 -c "
 import json, os, pyarrow as pa, pyarrow.parquet as pq
