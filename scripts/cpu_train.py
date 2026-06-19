@@ -153,8 +153,6 @@ if args.quick:
     args.eval_every = 10
     args.profile = True
     args.save_every = 0
-    if args.run == "dummy":
-        args.run = "microchat-quick"
     print0("⚡ Quick mode: tiny model + synthetic data + auto-batch")
     print0(f"   depth={args.depth} seq_len={args.max_seq_len} "
            f"batch={args.device_batch_size} total={args.total_batch_size} "
@@ -177,10 +175,10 @@ else:
     try:
         import wandb
         wandb_run = wandb.init(project="microchat-cpu", name=args.run, config=user_config)
-    except ImportError:
+    except Exception:
         wandb_run = DummyWandb()
         if master_process:
-            print0("Note: wandb not installed, using dummy logger")
+            print0("Note: wandb init failed, using dummy logger")
 
 # -----------------------------------------------------------------------------
 # Tokenizer (optional in synthetic mode)
