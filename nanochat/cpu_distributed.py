@@ -1163,3 +1163,101 @@ class StepProfiler:
                 print(f"  {p:<12} {ph['avg_ms']:>8.1f}ms {ph['pct']:>5.1f}% "
                       f"{ph['min_ms']:>7.1f} {ph['max_ms']:>7.1f}  {bar}")
         print("=" * 55)
+
+
+# ---------------------------------------------------------------------------
+# WAN Resilience — signal-safe checkpoint + auto-resume
+# ---------------------------------------------------------------------------
+
+class WANResilienceManager:
+    """Graceful shutdown and checkpoint recovery for WAN training runs.
+    Saves periodic checkpoints, registers signal handlers for graceful
+    shutdown, and supports auto-resume from the latest checkpoint.
+    """
+    def __init__(self, checkpoint_dir, save_every=0, master_process=True, rank=0):
+        self.checkpoint_dir = checkpoint_dir
+        self.save_every = save_every
+        self.master_process = master_process
+        self.rank = rank
+        self._last_save_step = -1
+        import os as _os
+        self._latest_step_file = _os.path.join(checkpoint_dir, "latest_step.txt")
+
+    def register_signal_handlers(self):
+        import signal as _signal
+        def _handler(signum, frame):
+            import sys as _sys
+            print(f"\n⚠ Signal {signum}, checkpoint may be incomplete")
+            _sys.exit(128 + signum)
+        try:
+            _signal.signal(_signal.SIGINT, _handler)
+            _signal.signal(_signal.SIGTERM, _handler)
+        except (ValueError, AttributeError):
+            pass
+
+    def has_checkpoint(self):
+        return self._read_latest_step() > 0
+
+    def get_resume_step(self):
+        return self._read_latest_step()
+
+    def _read_latest_step(self):
+        import os as _os
+        if _os.path.exists(self._latest_step_file):
+            try:
+                with open(self._latest_step_file) as f:
+                    return int(f.read().strip())
+            except (ValueError, OSError):
+                pass
+        return -1
+
+    def _write_latest_step(self, step):
+        if not self.master_process:
+            return
+        import os as _os
+        try:
+            _os.makedirs(self.checkpoint_dir, exist_ok=True)
+            with open(self._latest_step_file, "w") as f:
+                f.write(str(step))
+        except OSError:
+            pass
+
+    def maybe_save(self, step, model, optimizer, metadata, dataloader_state_dict, force=False):
+        if self.save_every <= 0 and not force:
+            return
+        is_time = (step > 0 and step % self.save_every == 0) or force
+        if not is_time or step == self._last_save_step:
+            return
+        self._last_save_step = step
+        if not self.master_process:
+            return
+        from nanochat.checkpoint_manager import save_checkpoint
+        try:
+            meta = {
+                "step": step,
+                "model_config": metadata.get("model_config", {}),
+                "user_config": metadata.get("user_config", {}),
+                "device_batch_size": metadata.get("device_batch_size", 1),
+                "max_seq_len": metadata.get("max_seq_len", 512),
+                "total_batch_size": metadata.get("total_batch_size", 512),
+                "dataloader_state_dict": dataloader_state_dict or {},
+                "loop_state": {
+                    "min_val_bpb": metadata.get("min_val_bpb", float("inf")),
+                    "smooth_train_loss": metadata.get("smooth_train_loss", 0),
+                    "total_training_time": metadata.get("total_training_time", 0),
+                },
+            }
+            save_checkpoint(self.checkpoint_dir, step,
+                model.state_dict() if hasattr(model, "state_dict") else {},
+                optimizer.state_dict() if hasattr(optimizer, "state_dict") else {},
+                meta, rank=self.rank)
+            self._write_latest_step(step)
+            print(f"  \U0001f4be Checkpoint saved at step {step}")
+        except Exception as e:
+            print(f"  \u26a0 Checkpoint save failed at step {step}: {e}")
+
+    def summary(self):
+        return {"save_every": self.save_every,
+                "latest_step": self._read_latest_step(),
+                "has_checkpoint": self.has_checkpoint(),
+                "checkpoint_dir": self.checkpoint_dir}

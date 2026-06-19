@@ -39,7 +39,7 @@ from nanochat.common import compute_init, compute_cleanup, print0, DummyWandb, p
 from nanochat.checkpoint_manager import save_checkpoint, load_checkpoint
 from nanochat.loss_eval import evaluate_bpb
 from nanochat.engine import Engine
-from nanochat.cpu_distributed import AdaptiveCommScheduler, TopologyAwareCommunicator, NetworkBenchmark, HeterogeneousLoadBalancer, StragglerMitigator, SyntheticDataLoader, StepProfiler
+from nanochat.cpu_distributed import AdaptiveCommScheduler, TopologyAwareCommunicator, NetworkBenchmark, HeterogeneousLoadBalancer, StragglerMitigator, SyntheticDataLoader, StepProfiler, WANResilienceManager
 
 # Tokenizer import — deferred because it requires rustbpe (only needed for non-synthetic)
 _tokenizer_imported = False
@@ -103,6 +103,8 @@ parser.add_argument("--dry-run", action="store_true", default=False, help="run 2
 # Profiling
 parser.add_argument("--profile", action="store_true", default=False, help="enable per-phase step timing breakdown")
 parser.add_argument("--profile-every", type=int, default=0, help="print per-step timing every N steps (0 = only at end)")
+# Resilience
+parser.add_argument("--resume", action="store_true", default=False, help="resume from latest checkpoint if available")
 # Evaluation
 parser.add_argument("--eval-every", type=int, default=10, help="evaluate val bpb every N steps (-1 = disable)")
 parser.add_argument("--eval-tokens", type=int, default=512, help="number of tokens to evaluate val loss on")
@@ -319,6 +321,29 @@ if args.profile and master_process:
     print0("✓ Per-phase step profiling enabled")
 
 # -----------------------------------------------------------------------------
+# WAN resilience: periodic checkpoints + auto-resume
+resilience = WANResilienceManager(
+    checkpoint_dir=checkpoint_dir,
+    save_every=args.save_every,
+    master_process=master_process,
+    rank=ddp_rank,
+)
+if args.save_every > 0:
+    resilience.register_signal_handlers()
+    print0(f"✓ WAN resilience enabled: checkpoint every {args.save_every} steps")
+
+# Auto-resume from latest checkpoint
+if args.resume and resilience.has_checkpoint():
+    resume_step = resilience.get_resume_step()
+    if args.resume_from_step == -1:
+        args.resume_from_step = resume_step
+        if master_process:
+            print0(f"✓ Auto-resuming from step {resume_step}")
+    else:
+        # Try finding the requested step, fall back to latest
+        print0(f"  --resume-from-step={args.resume_from_step} set, checking...")
+
+# -----------------------------------------------------------------------------
 # Heterogeneous load balancer (profile node speeds, detect stragglers)
 hetero_balancer = None
 straggler_watch = None
@@ -504,6 +529,25 @@ while True:
         })
 
     step += 1
+
+    # --- Periodic checkpoint save (WAN resilience) ---
+    resilience.maybe_save(
+        step=step,
+        model=orig_model,
+        optimizer=optimizer,
+        metadata={
+            "model_config": model_config_kwargs,
+            "user_config": user_config,
+            "device_batch_size": effective_device_batch,
+            "max_seq_len": args.max_seq_len,
+            "total_batch_size": args.total_batch_size,
+            "val_bpb": val_bpb,
+            "min_val_bpb": min_val_bpb,
+            "smooth_train_loss": smooth_train_loss,
+            "total_training_time": total_training_time,
+        },
+        dataloader_state_dict=dataloader_state_dict,
+    )
 
     # GC: freeze after first step to reduce overhead on CPU
     if step == 1:
