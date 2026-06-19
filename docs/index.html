@@ -303,13 +303,11 @@ if (Test-Path $MICROCHAT_DIR) {
 }
 
 Write-Host "=== Step 1b: Install dependencies ===" -ForegroundColor Cyan
-if (-not (Test-Path ".venv")) {
-    try {
-        uv sync --extra cpu
-    } catch {
-        Write-Host "uv failed, trying pip..." -ForegroundColor Yellow
-        pip install torch numpy pyarrow tiktoken rustbpe
-    }
+# Always ensure rustbpe is installed (existing .venv may be missing it)
+try {
+    uv sync --extra cpu
+} catch {
+    try { pip install rustbpe } catch { Write-Host "rustbpe install failed, continuing..." -ForegroundColor Yellow }
 }
 
 Write-Host "=== Step 2: Convert JSONL to Parquet ===" -ForegroundColor Cyan
