@@ -3,6 +3,7 @@
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MicroChat-CPU — Dataset to Training</title>
 <meta name="description" content="Drag & drop your JSONL dataset — automatically convert, generate scripts, and train.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🧠</text></svg>">
 <style>
 :root{--bg:#0a0a0f;--surface:#12121a;--surface2:#181825;--border:#1e1e2e;--text:#c8c8d4;--text-dim:#6b6b80;--accent:#7c5cfc;--accent-dim:rgba(124,92,252,.12);--green:#4ade80;--blue:#60a5fa;--orange:#fb923c;--red:#f87171;--font:'SF Mono','Cascadia Code','JetBrains Mono','Fira Code',monospace}
 *{margin:0;padding:0;box-sizing:border-box}
@@ -146,9 +147,16 @@ zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
 zone.addEventListener('drop', e => { e.preventDefault(); zone.classList.remove('dragover'); if (e.dataTransfer.files.length && e.dataTransfer.files[0].name.endsWith('.jsonl')) loadFile(e.dataTransfer.files[0]); });
 
 async function loadFile(file) {
+  try {
   const text = await file.text();
   const lines = text.split('\n').filter(l => l.trim());
-  const data = lines.map(l => JSON.parse(l));
+  const data = [];
+  let parseErrors = 0;
+  for (const l of lines) {
+    try { data.push(JSON.parse(l)); }
+    catch(e) { parseErrors++; console.warn('Bad JSONL line:', l.slice(0,80)); }
+  }
+  if (data.length === 0) { alert('No valid JSON lines found in file'); return; }
   dataset = data;
   zone.classList.add('has-file');
   document.getElementById('fileInfo').textContent = `📄 ${file.name}  (${file.size.toLocaleString()} bytes, ${data.length} rows)`;
@@ -208,6 +216,10 @@ async function loadFile(file) {
 
   // Console debug
   console.log(`Dataset: ${data.length} rows, ${totalTokens} tokens, depth=${depth}, iters=${numIter}`);
+  } catch (e) {
+    console.error('loadFile error:', e);
+    alert('Error loading dataset: ' + e.message);
+  }
 }
 
 function generateDownloads(data, filename, fmt, depth, maxSeqLen, totalBatch, numIter, totalTokens) {
