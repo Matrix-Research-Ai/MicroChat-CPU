@@ -2,7 +2,9 @@
 
 **Distributed CPU-only training of LLMs** — a fork of [karpathy/nanochat](https://github.com/karpathy/nanochat) adapted for multi-node CPU clusters connected via LAN or WAN.
 
-Train transformer language models across any machines with CPUs — no GPU required. Uses PyTorch's Gloo backend for distributed communication, FSDP for memory efficiency, and a suite of network optimizations for heterogeneous environments.
+[![CI](https://github.com/Matrix-Research-Ai/MicroChat-CPU/actions/workflows/ci.yml/badge.svg)](https://github.com/Matrix-Research-Ai/MicroChat-CPU/actions/workflows/ci.yml)
+
+Train transformer language models across any machines with CPUs — no GPU required.
 
 ## Quick Start
 
