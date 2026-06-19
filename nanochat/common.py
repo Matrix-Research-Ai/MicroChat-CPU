@@ -128,7 +128,7 @@ def print_banner():
 ██║╚██╔╝██║██║██║     ██╔══██╗██║     ██║     ██╔══██║██╔══██║   ██║
 ██║ ╚═╝ ██║██║╚██████╗██║  ██║╚██████╗╚██████╗██║  ██║██║  ██║   ██║
 ╚═╝     ╚═╝╚═╝ ╚═════╝╚═╝  ╚═╝ ╚═════╝ ╚═════╝╚═╝  ╚═╝╚═╝  ╚═╝   ╚═╝
-                     ██████╗ Pennsylvania State University
+                     ██████╗ Independent Researcher — Greece
                     ██╔════╝
                     ██║         Distributed CPU-only LLM Training
                     ██║
