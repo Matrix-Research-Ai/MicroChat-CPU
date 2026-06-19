@@ -41,6 +41,10 @@ from nanochat.loss_eval import evaluate_bpb
 from nanochat.engine import Engine
 from nanochat.cpu_distributed import AdaptiveCommScheduler, TopologyAwareCommunicator, NetworkBenchmark, HeterogeneousLoadBalancer, StragglerMitigator, SyntheticDataLoader, StepProfiler, WANResilienceManager
 
+# FSDP may be needed for isinstance checks even in single-node mode
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy
+
 # Tokenizer import — deferred because it requires rustbpe (only needed for non-synthetic)
 _tokenizer_imported = False
 _tokenizer_module = None
@@ -50,6 +54,15 @@ def _lazy_tokenizer():
         from nanochat import tokenizer as _tokenizer_module
         _tokenizer_imported = True
     return _tokenizer_module
+
+
+def _synth_val_loader(vocab_size=50304, B=2, T=128, device="cpu", num_batches=10):
+    """Synthetic validation loader that yields (x, y) without state_dict
+    (compatible with evaluate_bpb which expects 2-tuples)."""
+    loader = SyntheticDataLoader(vocab_size=vocab_size, B=B, T=T,
+                                 device=device, num_batches=num_batches)
+    for x, y, _ in loader:
+        yield x, y
 
 print_banner()
 
@@ -100,6 +113,7 @@ parser.add_argument("--straggler-ratio", type=float, default=2.0, help="node is 
 # Testing
 parser.add_argument("--synthetic", action="store_true", default=False, help="use synthetic random data instead of real dataset (no download needed)")
 parser.add_argument("--dry-run", action="store_true", default=False, help="run 2 steps, print diagnostics, then exit")
+parser.add_argument("--quick", action="store_true", default=False, help="auto-configure for a fast demo run (synthetic + tiny model + sensible defaults)")
 # Profiling
 parser.add_argument("--profile", action="store_true", default=False, help="enable per-phase step timing breakdown")
 parser.add_argument("--profile-every", type=int, default=0, help="print per-step timing every N steps (0 = only at end)")
@@ -114,6 +128,26 @@ parser.add_argument("--save-every", type=int, default=-1, help="save checkpoints
 parser.add_argument("--model-tag", type=str, default=None, help="override model tag for checkpoint directory name")
 args = parser.parse_args()
 user_config = vars(args).copy()
+
+# -----------------------------------------------------------------------------
+# --quick: auto-configure for a fast demo run
+if args.quick:
+    import os as _os
+    args.synthetic = True
+    args.depth = args.depth if args.depth != 4 else 2  # tiny model
+    args.max_seq_len = min(args.max_seq_len, 256)
+    args.device_batch_size = max(1, _os.cpu_count() or 2)  # use available cores
+    args.total_batch_size = args.device_batch_size * args.max_seq_len * 2
+    args.num_iterations = 20
+    args.eval_every = 10
+    args.profile = True
+    args.save_every = 0
+    if args.run == "dummy":
+        args.run = "microchat-quick"
+    print0("⚡ Quick mode: tiny model + synthetic data + auto-batch")
+    print0(f"   depth={args.depth} seq_len={args.max_seq_len} "
+           f"batch={args.device_batch_size} total={args.total_batch_size} "
+           f"steps={args.num_iterations}")
 # -----------------------------------------------------------------------------
 # Compute init — uses Gloo backend for CPU distributed via our modified common.py
 
@@ -126,19 +160,23 @@ print0(f"World size: {ddp_world_size} (distributed across {ddp_world_size} node(
 
 # wandb logging init
 use_dummy_wandb = args.run == "dummy" or not master_process
-wandb_run = DummyWandb() if use_dummy_wandb else None
-if not use_dummy_wandb:
-    import wandb
-    wandb_run = wandb.init(project="nanochat-cpu", name=args.run, config=user_config)
-else:
+if use_dummy_wandb:
     wandb_run = DummyWandb()
+else:
+    try:
+        import wandb
+        wandb_run = wandb.init(project="microchat-cpu", name=args.run, config=user_config)
+    except ImportError:
+        wandb_run = DummyWandb()
+        if master_process:
+            print0("Note: wandb not installed, using dummy logger")
 
 # -----------------------------------------------------------------------------
 # Tokenizer (optional in synthetic mode)
 vocab_size = 50304  # default GPT-2 vocab size
 if args.synthetic:
     tokenizer = None
-    token_bytes = 1.0
+    token_bytes = torch.ones(vocab_size, dtype=torch.long, device=device)
     print0(f"Vocab size: {vocab_size:,} (synthetic mode)")
 else:
     try:
@@ -178,8 +216,6 @@ model.init_weights()
 # FSDP: Fully Sharded Data Parallel for memory efficiency across nodes
 # Wrap the model with FSDP to shard parameters across all workers
 if ddp and ddp_world_size > 1:
-    from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-    from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy
     from torch.distributed.fsdp import ShardingStrategy
 
     # Auto-wrap: each transformer block gets its own FSDP unit
@@ -377,9 +413,9 @@ if args.synthetic:
         vocab_size=vocab_size, B=args.device_batch_size,
         T=args.max_seq_len, device=device, num_batches=1000,
     )
-    build_val_loader = lambda: SyntheticDataLoader(
+    build_val_loader = lambda: _synth_val_loader(
         vocab_size=vocab_size, B=args.device_batch_size,
-        T=args.max_seq_len, device=device, num_batches=10,
+        T=args.max_seq_len, device=device,
     )
     if master_process:
         print0("✓ Using synthetic data (no dataset download needed)")
