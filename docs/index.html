@@ -209,8 +209,10 @@ async function loadFile(file) {
     const maxSeqLen = Math.min(2048, Math.max(256, avgTokens * 2));
     const totalBatch = Math.min(2048, Math.max(128, Math.round(totalTokens / data.length / 2)));
     const numIter = Math.max(50, Math.round(totalTokens / totalBatch));
+    // Fix: total-batch-size must be divisible by max-seq-len × device-batch-size
+    const fixedBatch = maxSeqLen;
 
-    document.getElementById('autoParams').innerHTML = `<strong>⚡ Auto-params:</strong> depth=${depth}, max-seq-len=${maxSeqLen}, total-batch-size=${totalBatch}, num-iterations=${numIter}`;
+    document.getElementById('autoParams').innerHTML = `<strong>⚡ Auto-params:</strong> depth=${depth}, max-seq-len=${maxSeqLen}, total-batch-size=${fixedBatch}, num-iterations=${numIter} (+ tokenizer training)`;
 
     // Convert in-browser via Pyodide
     setStatus('loading', '⏳ Converting to Parquet in-browser...');
@@ -334,9 +336,11 @@ if ($DATA_DIR) {
     Write-Host "Copied parquet files to $DATA_DIR"
 }
 
-Write-Host "=== Step 4: Train ===" -ForegroundColor Cyan
-# Use venv python (has rustbpe installed)
-& ".venv/Scripts/python" -m scripts.cpu_train --depth=${depth} --num-iterations=${numIter} --max-seq-len=${maxSeqLen} --device-batch-size=1 --total-batch-size=${totalBatch} --eval-tokens=0
+Write-Host "=== Step 4: Train tokenizer ===" -ForegroundColor Cyan
+& ".venv/Scripts/python" -m scripts.tok_train --vocab-size=32768 --max-chars=4000000 2>&1 | Select-String -NotMatch "INFO - Progress"
+
+Write-Host "=== Step 5: Train model ===" -ForegroundColor Cyan
+& ".venv/Scripts/python" -m scripts.cpu_train --depth=${depth} --num-iterations=${numIter} --max-seq-len=${maxSeqLen} --device-batch-size=1 --total-batch-size=${fixedBatch} --eval-tokens=0
 
 Write-Host "\`n========================================" -ForegroundColor Green
 Write-Host "Training complete!" -ForegroundColor Green
@@ -448,7 +452,7 @@ with open('/tmp/dataset.jsonl') as f:
       `<span class="cmd">python3 -c "from nanochat.common import get_base_dir; print(get_base_dir())"</span><br><br>` +
       `<span class="comment"># 2. Copy downloaded .parquet files there</span><br><br>` +
       `<span class="comment"># 3. Train:</span><br>` +
-      `<span class="highlight">bash runs/runcpu_distributed.sh single --depth=${depth} --num-iterations=${numIter} --max-seq-len=${maxSeqLen} --device-batch-size=1 --total-batch-size=${totalBatch}</span>`;
+      `<span class="highlight">bash runs/runcpu_distributed.sh single --depth=${depth} --num-iterations=${numIter} --max-seq-len=${maxSeqLen} --device-batch-size=1 --total-batch-size=${fixedBatch}</span>`;
 
   } catch (e) {
     setStatus('err', '✗ Error: ' + e.message);
