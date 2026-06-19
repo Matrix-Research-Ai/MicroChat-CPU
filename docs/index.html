@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MicroChat-CPU — Dataset to Training</title>
+<meta name="description" content="Drag & drop your JSONL dataset and get step-by-step training instructions for MicroChat-CPU.">
+<style>
+:root{--bg:#0a0a0f;--surface:#12121a;--surface2:#181825;--border:#1e1e2e;--text:#c8c8d4;--text-dim:#6b6b80;--accent:#7c5cfc;--accent-dim:rgba(124,92,252,.12);--green:#4ade80;--blue:#60a5fa;--orange:#fb923c;--red:#f87171;--font:'SF Mono','Cascadia Code','JetBrains Mono','Fira Code',monospace}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;line-height:1.6;min-height:100vh}
+.container{max-width:860px;margin:0 auto;padding:2rem 1.5rem}
+header{text-align:center;padding:2.5rem 0 1.5rem;position:relative}
+header::before{content:'';position:absolute;top:0;left:50%;transform:translateX(-50%);width:400px;height:400px;background:radial-gradient(ellipse,var(--accent-dim) 0%,transparent 70%);pointer-events:none}
+.logo{display:inline-flex;align-items:center;gap:.75rem;font-size:1.6rem;font-weight:800;letter-spacing:-.02em;position:relative;color:#fff}
+.logo-icon{width:36px;height:36px;background:var(--accent);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:1.1rem;box-shadow:0 0 20px var(--accent-dim)}
+.subtitle{margin-top:.5rem;font-size:.85rem;color:var(--text-dim)}
+.badges{margin-top:1rem;display:flex;gap:.5rem;justify-content:center;flex-wrap:wrap}
+.badge{display:inline-flex;align-items:center;gap:.35rem;padding:.25rem .6rem;border-radius:6px;font-size:.7rem;font-family:var(--font);background:var(--surface);border:1px solid var(--border);color:var(--text-dim);text-decoration:none}
+.badge:hover{border-color:var(--accent);color:var(--accent)}
+.badge-dot{width:7px;height:7px;border-radius:50%;display:inline-block}
+.badge-dot.green{background:var(--green)}.badge-dot.blue{background:var(--blue)}.badge-dot.orange{background:var(--orange)}
+
+/* Drop zone */
+.drop-zone{background:var(--surface);border:2px dashed var(--border);border-radius:12px;padding:3rem 1.5rem;text-align:center;cursor:pointer;transition:all .2s;margin:1.5rem 0}
+.drop-zone:hover,.drop-zone.dragover{border-color:var(--accent);background:var(--accent-dim)}
+.drop-zone.has-file{border-color:var(--green);border-style:solid;background:rgba(74,222,128,.05)}
+.drop-zone .icon{font-size:2.5rem;margin-bottom:.5rem}
+.drop-zone .text{font-size:.9rem;color:var(--text-dim)}
+.drop-zone .text strong{color:var(--text)}
+.drop-zone .hint{font-size:.7rem;color:var(--text-dim);margin-top:.5rem}
+.drop-zone .file-info{display:none;margin-top:.5rem;font-size:.8rem;color:var(--green);font-family:var(--font)}
+.drop-zone.has-file .file-info{display:block}
+.drop-zone.has-file .icon,.drop-zone.has-file .text,.drop-zone.has-file .hint{display:none}
+.drop-zone input{display:none}
+
+/* Results */
+.section{display:none;margin:1.5rem 0}
+.section.visible{display:block}
+.section-title{font-size:1.05rem;font-weight:700;color:#fff;margin-bottom:.75rem;display:flex;align-items:center;gap:.5rem}
+.section-title .arrow{color:var(--accent)}
+
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:.5rem;margin:.75rem 0}
+.stat-card{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:.6rem;text-align:center}
+.stat-card .num{font-size:1.3rem;font-weight:700;font-family:var(--font);color:#fff}
+.stat-card .label{font-size:.65rem;color:var(--text-dim);margin-top:.15rem}
+.stat-card.accent .num{color:var(--accent)}.stat-card.green .num{color:var(--green)}.stat-card.blue .num{color:var(--blue)}.stat-card.orange .num{color:var(--orange)}
+
+.tabs{display:flex;gap:0;border-bottom:1px solid var(--border)}
+.tab{padding:.7rem 1.2rem;font-size:.82rem;cursor:pointer;border-bottom:2px solid transparent;color:var(--text-dim);transition:all .15s;background:none;border-top:none;border-left:none;border-right:none;font-family:inherit}
+.tab:hover{color:var(--text)}.tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+.tab-content{display:none;padding:1.25rem;background:var(--surface);border:1px solid var(--border);border-top:none;border-radius:0 0 12px 12px}
+.tab-content.active{display:block}
+
+.code-block{background:#0d0d15;border:1px solid var(--border);border-radius:8px;padding:1rem;font-family:var(--font);font-size:.78rem;line-height:1.7;overflow-x:auto;margin:.5rem 0;position:relative;white-space:pre-wrap}
+.code-block .comment{color:var(--text-dim)}.code-block .cmd{color:#fff}.code-block .highlight{color:var(--orange)}.code-block .str{color:var(--green)}.code-block .keyword{color:var(--accent)}
+.copy-btn{position:absolute;top:.5rem;right:.5rem;background:var(--surface2);border:1px solid var(--border);color:var(--text-dim);border-radius:4px;padding:.2rem .5rem;font-size:.6rem;cursor:pointer;font-family:var(--font);transition:all .15s}
+.copy-btn:hover{border-color:var(--accent);color:var(--accent)}
+
+.step{display:flex;gap:.75rem;margin-bottom:.75rem;align-items:flex-start}
+.step:last-child{margin-bottom:0}
+.step-num{flex-shrink:0;width:24px;height:24px;border-radius:6px;background:var(--accent);color:#fff;font-size:.7rem;font-weight:700;font-family:var(--font);display:flex;align-items:center;justify-content:center;margin-top:2px}
+.step-body{flex:1}
+.step-body h4{font-size:.85rem;color:#fff;margin-bottom:.15rem}
+.step-body p{font-size:.8rem;color:var(--text-dim);margin-bottom:.25rem}
+
+.info-box{background:var(--accent-dim);border:1px solid rgba(124,92,252,.2);border-radius:8px;padding:.75rem 1rem;font-size:.8rem;color:var(--text-dim);margin:.75rem 0}
+.info-box strong{color:var(--accent)}
+.warn-box{background:rgba(251,146,60,.08);border:1px solid rgba(251,146,60,.2);border-radius:8px;padding:.75rem 1rem;font-size:.8rem;color:var(--text-dim);margin:.75rem 0}
+.warn-box strong{color:var(--orange)}
+
+table{width:100%;border-collapse:collapse;font-size:.8rem;margin:.75rem 0}
+th{text-align:left;padding:.5rem .75rem;color:var(--text-dim);font-weight:600;border-bottom:1px solid var(--border);font-size:.7rem;text-transform:uppercase;letter-spacing:.05em}
+td{padding:.4rem .75rem;border-bottom:1px solid var(--border);font-family:var(--font);font-size:.75rem}
+tr:hover td{background:var(--accent-dim)}
+
+footer{text-align:center;padding:2rem 0;color:var(--text-dim);font-size:.75rem;border-top:1px solid var(--border);margin-top:2rem}
+footer a{color:var(--accent);text-decoration:none}
+
+.btn{display:inline-flex;align-items:center;gap:.5rem;padding:.45rem .9rem;border-radius:8px;font-size:.8rem;font-weight:600;border:none;cursor:pointer;transition:all .15s;font-family:inherit;margin-right:.4rem;margin-bottom:.4rem}
+.btn-primary{background:var(--accent);color:#fff}
+.btn-primary:hover{background:#8b6fff;box-shadow:0 0 20px var(--accent-dim)}
+.btn-secondary{background:var(--surface2);color:var(--text);border:1px solid var(--border)}
+.btn-secondary:hover{border-color:var(--accent)}
+
+@media(max-width:600px){.container{padding:1rem}.tab{padding:.5rem .8rem;font-size:.75rem}.stats-grid{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+<div class="container">
+
+<header>
+  <div class="logo"><div class="logo-icon">🧠</div>MicroChat-CPU</div>
+  <p class="subtitle">Drag & drop your JSONL dataset → get step-by-step training instructions</p>
+  <div class="badges">
+    <a class="badge" href="https://github.com/Matrix-Research-Ai/MicroChat-CPU"><span class="badge-dot orange"></span> GitHub</a>
+    <a class="badge" href="https://github.com/Matrix-Research-Ai/MicroChat-CPU/blob/master/README.md"><span class="badge-dot blue"></span> README</a>
+    <a class="badge" href="https://github.com/Matrix-Research-Ai/MicroChat-CPU/blob/master/WALKTHROUGH.md"><span class="badge-dot green"></span> Walkthrough</a>
+  </div>
+</header>
+
+<div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
+  <div class="icon">📂</div>
+  <div class="text">Drop your <strong>.jsonl</strong> dataset here or click to browse</div>
+  <div class="hint">Accepts Alpaca instruction format (instruction/input/response) or chat format (messages[])</div>
+  <div class="file-info" id="fileInfo"></div>
+  <input type="file" id="fileInput" accept=".jsonl" onchange="handleFile(event)">
+</div>
+
+<!-- Dataset Stats -->
+<div class="section" id="sectionStats">
+  <div class="section-title"><span class="arrow">▸</span> Dataset Stats</div>
+  <div class="stats-grid" id="statsGrid"></div>
+  <div id="formatNote" style="font-size:.78rem;color:var(--text-dim);margin-top:.25rem;"></div>
+</div>
+
+<!-- Format detection -->
+<div class="section" id="sectionFormat">
+  <div class="section-title"><span class="arrow">▸</span> Training Format</div>
+  <div class="tabs">
+    <button class="tab active" onclick="switchTab(this,'tabPretrain')">🔄 Pretraining</button>
+    <button class="tab" onclick="switchTab(this,'tabSFT')">💬 SFT (Chat)</button>
+  </div>
+  <div class="tab-content active" id="tabPretrain">
+    <p style="font-size:.82rem;color:var(--text-dim);margin-bottom:.5rem;">Train a GPT model from scratch on the raw text (next-token prediction). Best for knowledge-heavy datasets.</p>
+    <div class="step"><div class="step-num">1</div><div class="step-body"><h4>Install MicroChat-CPU</h4>
+      <div class="code-block"><button class="copy-btn" onclick="copyText(this)">📋 Copy</button>git clone https://github.com/Matrix-Research-Ai/MicroChat-CPU.git<br>cd MicroChat-CPU<br>source .venv/bin/activate || uv sync --extra cpu && source .venv/bin/activate</div></div></div>
+    <div class="step"><div class="step-num">2</div><div class="step-body"><h4>Convert your dataset to Parquet</h4><p>Run this command in your dataset directory:</p>
+      <div class="code-block" id="convertPretrainScript"><button class="copy-btn" onclick="copyText(this)">📋 Copy</button><span class="comment"># Loading dataset...</span></div></div></div>
+    <div class="step"><div class="step-num">3</div><div class="step-body"><h4>Copy to data directory</h4>
+      <div class="code-block" id="copyDataScript"><button class="copy-btn" onclick="copyText(this)">📋 Copy</button><span class="comment"># Will appear after conversion</span></div></div></div>
+    <div class="step"><div class="step-num">4</div><div class="step-body"><h4>Run training</h4>
+      <div class="code-block"><button class="copy-btn" onclick="copyText(this)">📋 Copy</button>bash runs/runcpu_distributed.sh single --depth=4 --num-iterations=200 --max-seq-len=512 --device-batch-size=1 --total-batch-size=512</div>
+      <p style="font-size:.75rem;color:var(--text-dim);margin-top:.3rem;">Or: <code>python -m scripts.cpu_train --depth=4 --num-iterations=200 --max-seq-len=512 --device-batch-size=1 --total-batch-size=512 --eval-tokens=0 --core-metric-every=-1</code></p></div></div>
+    <div class="step"><div class="step-num">5</div><div class="step-body"><h4>Chat with the model</h4>
+      <div class="code-block"><button class="copy-btn" onclick="copyText(this)">📋 Copy</button>python -m scripts.chat_cli --model-tag=d4</div></div></div>
+    <div class="info-box" id="pretrainNote"><strong>💡</strong> Your dataset has <span id="totalTokensSpan">—</span> tokens. A depth=4 model (40M params) will train in a few minutes on CPU.</div>
+  </div>
+  <div class="tab-content" id="tabSFT">
+    <p style="font-size:.82rem;color:var(--text-dim);margin-bottom:.5rem;">Fine-tune an existing checkpoint on your data in chat format. Best for instruction/conversational datasets.</p>
+    <div class="step"><div class="step-num">1</div><div class="step-body"><h4>Install MicroChat-CPU</h4>
+      <div class="code-block"><button class="copy-btn" onclick="copyText(this)">📋 Copy</button>git clone https://github.com/Matrix-Research-Ai/MicroChat-CPU.git<br>cd MicroChat-CPU<br>source .venv/bin/activate || uv sync --extra cpu && source .venv/bin/activate</div></div></div>
+    <div class="step"><div class="step-num">2</div><div class="step-body"><h4>Convert to chat format</h4>
+      <div class="code-block" id="convertSFTScript"><button class="copy-btn" onclick="copyText(this)">📋 Copy</button><span class="comment"># Loading dataset...</span></div></div></div>
+    <div class="step"><div class="step-num">3</div><div class="step-body"><h4>Edit chat_sft.py</h4><p>Open <code>scripts/chat_sft.py</code> and add <code>CustomJSON</code> to the <code>train_tasks</code> list:</p>
+      <div class="code-block" id="sftEditScript"><button class="copy-btn" onclick="copyText(this)">📋 Copy</button><span class="comment"># Add this line to train_tasks (around line 165)</span><br>CustomJSON(filepath=r"<span id="sftPath">C:\path\to\dataset</span>"),</div></div></div>
+    <div class="step"><div class="step-num">4</div><div class="step-body"><h4>Run SFT</h4>
+      <div class="code-block"><button class="copy-btn" onclick="copyText(this)">📋 Copy</button>python -m scripts.chat_sft --device-type=cpu --num-iterations=100</div>
+      <p style="font-size:.75rem;color:var(--text-dim);margin-top:.3rem;">Requires a pretrained checkpoint first. Run <code>python -m scripts.base_train --depth=4 --num-iterations=50</code> if you don't have one.</p></div></div>
+    <div class="step"><div class="step-num">5</div><div class="step-body"><h4>Chat with the fine-tuned model</h4>
+      <div class="code-block"><button class="copy-btn" onclick="copyText(this)">📋 Copy</button>python -m scripts.chat_cli --model-tag=chatsft/d4</div></div></div>
+    <div class="info-box" id="sftNote"><strong>💡</strong> <span id="sftFormatNote">Your dataset will be converted to chat format with user/assistant messages.</span></div>
+  </div>
+</div>
+
+<!-- Quick smoke test -->
+<div class="section" id="sectionSmoke">
+  <div class="section-title"><span class="arrow">▸</span> Quick Smoke Test</div>
+  <div class="code-block"><button class="copy-btn" onclick="copyText(this)">📋 Copy</button>cd MicroChat-CPU<br>source .venv/bin/activate<br><span class="highlight">python -m scripts.cpu_train --synthetic --dry-run --depth=2</span></div>
+  <p style="font-size:.78rem;color:var(--text-dim);margin-top:.3rem;">Downloads nothing, runs in 2 seconds. If this passes, everything is installed correctly.</p>
+</div>
+
+<!-- CLI reference -->
+<div class="section" id="sectionCLI">
+  <div class="section-title"><span class="arrow">▸</span> CLI Reference</div>
+  <table>
+    <tr><th>Flag</th><th>Default</th><th>Description</th></tr>
+    <tr><td><code>--depth</code></td><td>4</td><td>Transformer layers (4≈40M, 8≈120M, 12≈300M)</td></tr>
+    <tr><td><code>--num-iterations</code></td><td>50</td><td>Training steps (-1 = full epoch)</td></tr>
+    <tr><td><code>--max-seq-len</code></td><td>2048</td><td>Context window (<span id="recSeqLen">512</span> recommended for your data)</td></tr>
+    <tr><td><code>--device-batch-size</code></td><td>1</td><td>Samples per step (CPU needs 1–2)</td></tr>
+    <tr><td><code>--total-batch-size</code></td><td>524288</td><td>Total tokens per step (lower for CPU: <span id="recBatchSize">512</span>)</td></tr>
+    <tr><td><code>--device-type</code></td><td>auto</td><td>cpu / cuda / mps</td></tr>
+    <tr><td><code>--synthetic</code></td><td>false</td><td>Fake data for testing</td></tr>
+  </table>
+</div>
+
+<footer><p><a href="https://github.com/Matrix-Research-Ai/MicroChat-CPU">GitHub</a> · <a href="https://github.com/Matrix-Research-Ai/MicroChat-CPU/blob/master/README.md">README</a> · <a href="https://github.com/Matrix-Research-Ai/MicroChat-CPU/blob/master/WALKTHROUGH.md">Walkthrough</a> · <a href="https://github.com/Matrix-Research-Ai">Matrix Research AI</a></p></footer>
+</div>
+
+<script>
+let dataset = null, format = null;
+
+function handleFile(e) { if (e.target.files[0]) loadFile(e.target.files[0]); }
+
+const zone = document.getElementById('dropZone');
+zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('dragover'); });
+zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
+zone.addEventListener('drop', e => { e.preventDefault(); zone.classList.remove('dragover'); if (e.dataTransfer.files.length && e.dataTransfer.files[0].name.endsWith('.jsonl')) loadFile(e.dataTransfer.files[0]); });
+
+async function loadFile(file) {
+  const text = await file.text();
+  const lines = text.split('\n').filter(l => l.trim());
+  const data = lines.map(l => JSON.parse(l));
+
+  dataset = data;
+  zone.classList.add('has-file');
+  document.getElementById('fileInfo').textContent = `📄 ${file.name}  (${file.size.toLocaleString()} bytes, ${data.length} rows)`;
+
+  // Detect format
+  const keys = Object.keys(data[0]);
+  format = null;
+  if (keys.includes('instruction') && keys.includes('response')) format = 'instruction';
+  else if (keys.includes('messages')) format = 'chat';
+  else if (keys.includes('text')) format = 'pretrain';
+  else if (Array.isArray(data[0]) && data[0][0]?.role) format = 'chat_array';
+  else format = 'unknown';
+
+  // Stats
+  document.getElementById('sectionStats').classList.add('visible');
+  document.getElementById('sectionFormat').classList.add('visible');
+  document.getElementById('sectionSmoke').classList.add('visible');
+  document.getElementById('sectionCLI').classList.add('visible');
+
+  const quals = data.filter(d => d.quality_score != null).map(d => d.quality_score);
+  const toks = data.filter(d => d.est_tokens != null).map(d => d.est_tokens);
+  const chars = data.filter(d => d.response).map(d => d.response.length);
+  const chapters = new Set(data.filter(d => d.chapter).map(d => d.chapter)).size;
+
+  const totalTokens = toks.length ? toks.reduce((a,b)=>a+b,0) : 0;
+  const avgTokens = toks.length ? Math.round(toks.reduce((a,b)=>a+b,0)/toks.length) : 0;
+  const totalChars = chars.length ? chars.reduce((a,b)=>a+b,0) : 0;
+  const avgQuality = quals.length ? (quals.reduce((a,b)=>a+b,0)/quals.length).toFixed(2) : '—';
+
+  document.getElementById('statsGrid').innerHTML = `
+    <div class="stat-card accent"><div class="num">${data.length.toLocaleString()}</div><div class="label">Examples</div></div>
+    <div class="stat-card green"><div class="num">${avgQuality}</div><div class="label">Avg Quality</div></div>
+    <div class="stat-card blue"><div class="num">${totalTokens.toLocaleString()}</div><div class="label">Tokens</div></div>
+    <div class="stat-card orange"><div class="num">${(totalChars/1000).toFixed(1)}K</div><div class="label">Characters</div></div>
+    <div class="stat-card accent"><div class="num">${chapters || '—'}</div><div class="label">Chapters</div></div>
+    <div class="stat-card blue"><div class="num">${avgTokens}</div><div class="label">Avg Tok/Chunk</div></div>`;
+
+  const formatNames = {instruction:'Alpaca Instruction',chat:'Chat (messages[])',chat_array:'Chat (array[])',pretrain:'Raw Text',unknown:'Unknown'};
+  document.getElementById('formatNote').textContent = `Detected format: ${formatNames[format] || format}`;
+
+  // Update recommendations
+  document.getElementById('totalTokensSpan').textContent = totalTokens.toLocaleString();
+  const recSeqLen = Math.min(2048, Math.max(128, avgTokens * 2));
+  document.getElementById('recSeqLen').textContent = recSeqLen;
+  document.getElementById('recBatchSize').textContent = Math.min(2048, Math.max(128, totalTokens / 10 / data.length * recSeqLen));
+
+  // Generate scripts
+  genPretrainScript(data, file.name);
+  genSFTScript(data, file.name);
+}
+
+function genPretrainScript(data, filename) {
+  const texts = data.filter(d => d.response).map(d => JSON.stringify(d.response.replace(/\\/g, '\\\\').replace(/'/g, "'\\''")));
+  const totalTokens = data.filter(d => d.est_tokens).reduce((a,b) => a + (b.est_tokens || 0), 0);
+
+  const script = `import json, pyarrow as pa, pyarrow.parquet as pq, os
+
+# Read dataset
+lines = [json.loads(l) for l in open('${filename}')]
+
+# Extract response text
+texts = [l['response'] for l in lines if l.get('response')]
+
+# Write Parquet files
+out = os.path.expanduser('~/microchat_data')
+os.makedirs(out, exist_ok=True)
+
+# Training (95%)
+train = texts[:int(len(texts)*0.95)]
+pq.write_table(pa.table({'text': pa.array(train)}),
+    f'{out}/shard_00000.parquet')
+
+# Validation (5%)
+val = texts[int(len(texts)*0.95):]
+pq.write_table(pa.table({'text': pa.array(val)}),
+    f'{out}/shard_00001.parquet')
+
+print(f'Train: {len(train)} rows, Val: {len(val)} rows')
+print(f'Output: {out}/')`;
+
+  document.getElementById('convertPretrainScript').innerHTML = `<button class="copy-btn" onclick="copyText(this)">📋 Copy</button>${escapeHtml(script)}`;
+
+  document.getElementById('copyDataScript').innerHTML = `<button class="copy-btn" onclick="copyText(this)">📋 Copy</button><span class="comment"># Copy converted Parquet files to MicroChat-CPU data dir</span><br>python3 -c "from nanochat.common import get_base_dir; print(get_base_dir())"<br><br><span class="comment"># Then copy:</span><br>cp ~/microchat_data/shard_*.parquet /path/to/base_data_climbmix/`;
+
+  if (totalTokens < 100000) {
+    document.getElementById('pretrainNote').innerHTML = '<strong>⚠️ Small dataset:</strong> ' + totalTokens.toLocaleString() + ' tokens will overfit fast. Use as a test run — combine with ClimbMix for real learning.';
+  }
+}
+
+function genSFTScript(data, filename) {
+  const hasInst = data[0]?.instruction != null;
+  const hasInput = data[0]?.input != null;
+  const hasResponse = data[0]?.response != null;
+
+  let genCode;
+  if (hasInst && hasResponse) {
+    genCode = `import json
+
+lines = [json.loads(l) for l in open('${filename}')]
+
+with open('encyclopedia_sft.jsonl', 'w') as f:
+    for l in lines:
+        inst = l.get('instruction', '')
+        inp = l.get('input', '')
+        resp = l.get('response', '')
+        user_msg = f"{inst}\\n{inp}" if inp else inst
+        chat = [
+            {"role": "user", "content": user_msg},
+            {"role": "assistant", "content": resp}
+        ]
+        f.write(json.dumps(chat, ensure_ascii=False) + '\\n')
+
+print(f"Wrote encyclopedia_sft.jsonl ({len(lines)} rows)")`;
+  } else {
+    genCode = `import json
+
+lines = [json.loads(l) for l in open('${filename}')]
+
+with open('converted_sft.jsonl', 'w') as f:
+    for l in lines:
+        # Adjust this mapping based on your data structure
+        if 'messages' in l:
+            f.write(json.dumps(l['messages'], ensure_ascii=False) + '\\n')
+        elif 'text' in l:
+            chat = [
+                {"role": "user", "content": "Study the following:"},
+                {"role": "assistant", "content": l['text']}
+            ]
+            f.write(json.dumps(chat, ensure_ascii=False) + '\\n')
+
+print(f"Wrote converted_sft.jsonl ({len(lines)} rows)")`;
+  }
+
+  document.getElementById('convertSFTScript').innerHTML = `<button class="copy-btn" onclick="copyText(this)">📋 Copy</button>${escapeHtml(genCode)}`;
+
+  const sftPath = `C:\\\\Users\\\\${getUserName()}\\\\microchat_data\\\\encyclopedia_sft.jsonl`;
+  document.getElementById('sftPath').textContent = sftPath;
+  document.getElementById('sftEditScript').innerHTML = `<button class="copy-btn" onclick="copyText(this)">📋 Copy</button><span class="comment"># Add to train_tasks in scripts/chat_sft.py (around line 165):</span><br><span class="highlight">CustomJSON(filepath=r"${sftPath}"),</span>`;
+}
+
+function getUserName() {
+  // Try to detect from environment
+  for (const k of ['USERNAME','USER','LOGNAME']) {
+    // Not available in browser - fallback
+  }
+  return 'YourUsername';
+}
+
+function escapeHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function switchTab(el, id) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById(id).classList.add('active');
+}
+
+function copyText(btn) {
+  const block = btn.closest('.code-block');
+  let text = block.textContent.replace('📋 Copy', '').trim();
+  const orig = btn.textContent;
+  const done = () => { btn.textContent = '✓ Copied!'; setTimeout(() => { btn.textContent = orig; }, 2000); };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, btn, orig));
+  } else {
+    fallbackCopy(text, btn, orig);
+  }
+}
+function fallbackCopy(text, btn, orig) {
+  const saved = document.activeElement;
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.cssText = 'position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0';
+  document.body.appendChild(ta);
+  ta.focus(); ta.setSelectionRange(0, text.length);
+  document.execCommand('copy');
+  document.body.removeChild(ta);
+  if (saved && saved.focus) saved.focus();
+  btn.textContent = '✓ Copied!'; setTimeout(() => { btn.textContent = orig; }, 2000);
+}
+</script>
+</body>
+</html>
