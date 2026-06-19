@@ -218,7 +218,13 @@ async function loadFile(file) {
 import json
 with open('/tmp/dataset.jsonl') as f:
     lines = [json.loads(l) for l in f if l.strip()]
-texts = [l.get('response') or l.get('text') or '' for l in lines if l.get('response') or l.get('text')]
+texts = []
+for l in lines:
+    if isinstance(l, dict):
+        t = l.get('response') or l.get('text') or ''
+        if t: texts.append(t)
+    elif isinstance(l, list) and len(l) >= 2:
+        texts.append(l[-1].get('content', '') if isinstance(l[-1], dict) else str(l[-1]))
 train_count = int(len(texts) * 0.95) or max(len(texts) - 1, 1)
 json.dumps({'train': train_count, 'val': len(texts) - train_count, 'total': len(texts), 'chars': sum(len(t) for t in texts)})
 `);
@@ -232,13 +238,17 @@ with open('/tmp/dataset.jsonl') as f:
     lines = [json.loads(l) for l in f if l.strip()]
 out = []
 for l in lines:
-    if 'instruction' in l and 'response' in l:
-        user_msg = (l['instruction'] + '\\n' + l['input']) if l.get('input') else l['instruction']
-        out.append(json.dumps([{'role':'user','content':user_msg},{'role':'assistant','content':l['response']}], ensure_ascii=False))
-    elif 'messages' in l:
-        out.append(json.dumps(l['messages'], ensure_ascii=False))
-    elif 'text' in l:
-        out.append(json.dumps([{'role':'user','content':'Study this:'},{'role':'assistant','content':l['text']}], ensure_ascii=False))
+    if isinstance(l, dict):
+        if 'instruction' in l and 'response' in l:
+            user_msg = (l['instruction'] + '\\n' + l['input']) if l.get('input') else l['instruction']
+            out.append(json.dumps([{'role':'user','content':user_msg},{'role':'assistant','content':l['response']}], ensure_ascii=False))
+        elif 'messages' in l:
+            out.append(json.dumps(l['messages'], ensure_ascii=False))
+        elif 'text' in l:
+            out.append(json.dumps([{'role':'user','content':'Study this:'},{'role':'assistant','content':l['text']}], ensure_ascii=False))
+    elif isinstance(l, list):
+        # Already in chat array format
+        out.append(json.dumps(l, ensure_ascii=False))
 '\\n'.join(out)
 `);
 
