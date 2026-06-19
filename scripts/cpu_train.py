@@ -294,6 +294,26 @@ def get_lr_multiplier(it):
         progress = (num_iterations - it) / warmdown_iters
         return progress * 1.0 + (1 - progress) * args.final_lr_frac
 
+# Momentum scheduler for Muon optimizer (from base_train.py scaling laws)
+def get_muon_momentum(it):
+    warmdown_iters = round(args.warmdown_ratio * num_iterations)
+    warmdown_start = num_iterations - warmdown_iters
+    if it < 400:
+        frac = it / 400
+        return (1 - frac) * 0.85 + frac * 0.97
+    elif it >= warmdown_start:
+        progress = (it - warmdown_start) / warmdown_iters
+        return 0.97 * (1 - progress) + 0.90 * progress
+    else:
+        return 0.97
+
+# Weight decay scheduler for Muon optimizer (cosine decay over training)
+def get_weight_decay(it):
+    return weight_decay_scaled * 0.5 * (1 + math.cos(math.pi * it / num_iterations))
+
+# Scale weight decay for this model size (simplified from base_train.py)
+weight_decay_scaled = args.weight_decay
+
 # -----------------------------------------------------------------------------
 # Initialize the Optimizer
 optimizer = model.setup_optimizer(
@@ -301,7 +321,7 @@ optimizer = model.setup_optimizer(
     embedding_lr=args.embedding_lr,
     scalar_lr=args.scalar_lr,
     matrix_lr=args.matrix_lr,
-    weight_decay=args.weight_decay,
+    weight_decay=weight_decay_scaled,
 )
 
 if resuming:
@@ -552,8 +572,13 @@ while True:
     # ── Overlap window: work that doesn't need synced gradients ──
     # Compute LR schedule, momentum, weight decay for this step
     lrm = get_lr_multiplier(step)
+    muon_momentum = get_muon_momentum(step)
+    muon_weight_decay = get_weight_decay(step)
     for group in optimizer.param_groups:
         group["lr"] = group["initial_lr"] * lrm
+        if group.get('kind') == 'muon':
+            group["momentum"] = muon_momentum
+            group["weight_decay"] = muon_weight_decay
 
     # Simulate bandwidth throttle during overlap window
     if wan_sim.enabled:
