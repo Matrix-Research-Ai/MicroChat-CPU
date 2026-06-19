@@ -211,8 +211,24 @@ async function loadFile(file) {
 }
 
 function generateDownloads(data, filename, fmt, depth, maxSeqLen, totalBatch, numIter, totalTokens) {
-  const btns = document.getElementById('downloadBtns');
-  let html = '';
+  const container = document.getElementById('downloadBtns');
+  container.innerHTML = '';
+  const btns = [];
+
+  // Helper to create a download button
+  function addBtn(label, cls, content, fname) {
+    const btn = document.createElement('button');
+    btn.className = 'btn ' + cls;
+    btn.textContent = label;
+    btn.addEventListener('click', () => {
+      const blob = new Blob([content], {type:'application/octet-stream'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = fname; a.click();
+      URL.revokeObjectURL(url);
+    });
+    container.appendChild(btn);
+  }
 
   // 1. Pretrain conversion script
   const pretrainPy = `#!/usr/bin/env python3
@@ -244,18 +260,21 @@ print(f"  cp {out}/shard_*.parquet /path/to/base_data_climbmix/")
 print(f"\\nThen train:")
 print(f"  bash runs/runcpu_distributed.sh single --depth=${depth} --num-iterations=${numIter} --max-seq-len=${maxSeqLen} --device-batch-size=1 --total-batch-size=${totalBatch}")
 `;
-
-  html += `<button class="btn btn-primary" onclick="downloadPy(${JSON.stringify(pretrainPy)}, 'prepare_pretrain.py')">⬇ prepare_pretrain.py</button>`;
+  addBtn('⬇ prepare_pretrain.py', 'btn-primary', pretrainPy, 'prepare_pretrain.py');
 
   // 2. SFT chat JSONL (generated in-browser)
   if (fmt === 'instruction') {
     const chatLines = data.map(l => {
-      const userMsg = l.input ? `${l.instruction}\\n${l.input}` : l.instruction;
+      const userMsg = l.input ? l.instruction + '\\n' + l.input : l.instruction;
       return JSON.stringify([{role:"user",content:userMsg},{role:"assistant",content:l.response}]);
     }).join('\n');
-    html += ` <button class="btn btn-green" onclick="downloadStr(${JSON.stringify(chatLines)}, 'sft_data.jsonl')">⬇ sft_data.jsonl</button>`;
+    addBtn('⬇ sft_data.jsonl', 'btn-green', chatLines, 'sft_data.jsonl');
   } else {
-    html += ` <button class="btn btn-green" onclick="downloadStr(generateChatJSONL(), 'sft_data.jsonl')">⬇ sft_data.jsonl</button>`;
+    const chatLines = data.map(l => {
+      const text = l.response || l.text || JSON.stringify(l);
+      return JSON.stringify([{role:"user",content:"Study the following passage:"},{role:"assistant",content:text}]);
+    }).join('\n');
+    addBtn('⬇ sft_data.jsonl', 'btn-green', chatLines, 'sft_data.jsonl');
   }
 
   // 3. Auto-patch script for chat_sft.py
@@ -282,13 +301,13 @@ if "CustomJSON(filepath=" in code and "encyclopedia_sft" not in code:
     exit(0)
 
 # Find train_tasks opening bracket
-match = re.search(r'train_tasks\s*=\s*\\[', code)
+match = re.search(r'train_tasks\\s*=\\s*\\[', code)
 if not match:
     print("ERROR: Could not find train_tasks = [ in chat_sft.py")
     exit(1)
 
 pos = match.end()
-insert = f'\\n    CustomJSON(filepath=r"{sft_path}"),  # auto-added'
+insert = '\\n    CustomJSON(filepath=r"' + sft_path + '"),  # auto-added'
 code = code[:pos] + insert + code[pos:]
 
 # Also ensure import exists
@@ -304,8 +323,7 @@ print(f"Patched {chat_sft} - added CustomJSON dataset")
 print(f"  filepath: {sft_path}")
 print(f"\\nNow run: python -m scripts.chat_sft --device-type=cpu --num-iterations=100")
 `;
-
-  html += ` <button class="btn btn-orange" onclick="downloadPy(${JSON.stringify(patchPy)}, 'patch_sft.py')">⬇ patch_sft.py</button>`;
+  addBtn('⬇ patch_sft.py', 'btn-orange', patchPy, 'patch_sft.py');
 
   // 4. Full training launch script
   const launchSh = `#!/usr/bin/env bash
@@ -337,10 +355,7 @@ python -m scripts.cpu_train --depth=${depth} --num-iterations=${numIter} --max-s
 
 echo "Done! Chat with: python -m scripts.chat_cli --model-tag=d${depth}"
 `;
-
-  html += ` <button class="btn btn-secondary" onclick="downloadPy(${JSON.stringify(launchSh)}, 'train.sh')">⬇ train.sh</button>`;
-
-  btns.innerHTML = html;
+  addBtn('⬇ train.sh', 'btn-secondary', launchSh, 'train.sh');
 }
 
 function generateChatJSONL() {
