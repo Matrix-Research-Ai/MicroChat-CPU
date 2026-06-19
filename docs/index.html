@@ -337,7 +337,8 @@ if ($DATA_DIR) {
 }
 
 Write-Host "=== Step 4: Train tokenizer ===" -ForegroundColor Cyan
-& ".venv/Scripts/python" -m scripts.tok_train --vocab-size=32768 --max-chars=4000000 2>&1 | Select-String -NotMatch "INFO - Progress"
+& ".venv/Scripts/python" -m scripts.tok_train --vocab-size=32768 --max-chars=4000000 2>$null
+if ($LASTEXITCODE -ne 0) { Write-Host "Tokenizer training failed!" -ForegroundColor Red; Read-Host "Press Enter"; exit 1 }
 
 Write-Host "=== Step 5: Train model ===" -ForegroundColor Cyan
 & ".venv/Scripts/python" -m scripts.cpu_train --depth=${depth} --num-iterations=${numIter} --max-seq-len=${maxSeqLen} --device-batch-size=1 --total-batch-size=${fixedBatch} --eval-tokens=0
