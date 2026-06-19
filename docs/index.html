@@ -313,18 +313,21 @@ if (-not (Test-Path ".venv")) {
 }
 
 Write-Host "=== Step 2: Convert JSONL to Parquet ===" -ForegroundColor Cyan
-python3 -c @"
+$pyScript = @"
 import json, os, pyarrow as pa, pyarrow.parquet as pq
-with open("$DATASET_PATH", encoding="utf-8") as f:
+with open(r'$DATASET_PATH', encoding='utf-8') as f:
     lines = [json.loads(l) for l in f if l.strip()]
-texts = [l.get("response") or l.get("text") or "" for l in lines if l.get("response") or l.get("text")]
+texts = [l.get('response') or l.get('text') or '' for l in lines if l.get('response') or l.get('text')]
 split = int(len(texts) * 0.95) or max(len(texts) - 1, 1)
-out = "$OUTPUT_DIR"
+out = r'$OUTPUT_DIR'
 os.makedirs(out, exist_ok=True)
-for name, chunk in [("shard_00000", texts[:split]), ("shard_00001", texts[split:])]:
-    pq.write_table(pa.table({"text": pa.array(chunk)}), os.path.join(out, f"{name}.parquet"))
-    print(f"Wrote {name}.parquet ({len(chunk)} rows)")
+for name, chunk in [('shard_00000', texts[:split]), ('shard_00001', texts[split:])]:
+    pq.write_table(pa.table({'text': pa.array(chunk)}), os.path.join(out, f'{name}.parquet'))
+    print(f'Wrote {name}.parquet ({len(chunk)} rows)')
 "@
+$pyScript | Out-File -FilePath "$env:TEMP\convert_data.py" -Encoding utf8
+python3 "$env:TEMP\convert_data.py"
+Remove-Item "$env:TEMP\convert_data.py" -ErrorAction SilentlyContinue
 
 Write-Host "=== Step 3: Find data dir and copy ===" -ForegroundColor Cyan
 $DATA_DIR = & python3 -c "from nanochat.common import get_base_dir; print(get_base_dir())" 2>$null
