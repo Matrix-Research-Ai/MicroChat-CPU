@@ -307,8 +307,8 @@ Write-Host "=== Step 1b: Install dependencies ===" -ForegroundColor Cyan
 try {
     uv sync --extra cpu
 } catch { }
-# Force install rustbpe in case uv sync skipped it
-pip install rustbpe 2>$null
+# Use venv's pip (system pip won't install into .venv)
+& ".venv/Scripts/python" -m pip install rustbpe --quiet 2>$null
 
 Write-Host "=== Step 2: Convert JSONL to Parquet ===" -ForegroundColor Cyan
 $pyScript = @"
