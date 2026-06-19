@@ -308,7 +308,7 @@ try {
     uv sync --extra cpu
 } catch { }
 # Use venv's pip (system pip won't install into .venv)
-& ".venv/Scripts/python" -m pip install rustbpe --quiet 2>$null
+uv pip install rustbpe --quiet 2>$null
 
 Write-Host "=== Step 2: Convert JSONL to Parquet ===" -ForegroundColor Cyan
 $pyScript = @"
