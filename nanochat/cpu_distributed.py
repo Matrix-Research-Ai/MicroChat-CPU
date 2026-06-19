@@ -1353,3 +1353,105 @@ class WANResilienceManager:
                 "latest_step": self._read_latest_step(),
                 "has_checkpoint": self.has_checkpoint(),
                 "checkpoint_dir": self.checkpoint_dir}
+
+
+# ---------------------------------------------------------------------------
+# WAN Simulator — test compression/async under realistic WAN conditions
+# ---------------------------------------------------------------------------
+
+class WANSimulator:
+    """Simulates WAN network conditions for testing communication optimizations.
+
+    The research calls for testing under WAN scenarios to validate that
+    gradient compression, sparsification, and async overlap actually help.
+    This class injects artificial latency and bandwidth limits without
+    needing actual geo-distributed machines.
+
+    Usage:
+        sim = WANSimulator(latency_ms=50, bandwidth_mbps=100)
+        sim.start_step()       # call before gradient sync
+        sim.throttle(data_bytes)  # sleeps to simulate bandwidth
+        sim.end_step()         # adds round-trip latency
+        print(sim.summary())   # how much time was "wasted" on WAN
+    """
+
+    def __init__(
+        self,
+        enabled: bool = False,
+        latency_ms: float = 0.0,
+        bandwidth_mbps: float = 0.0,
+        loss_rate: float = 0.0,
+    ):
+        """
+        Args:
+            enabled: Set False to skip all simulation (zero overhead).
+            latency_ms: Artificial one-way latency in milliseconds.
+            bandwidth_mbps: Artificial bandwidth cap in Mbps (0 = unlimited).
+            loss_rate: Probability of dropping a sync (0.0-1.0). When a sync
+                       is "lost", the step's gradients are stale — simulating
+                       a node that missed the all-reduce. (Experimental.)
+        """
+        self.enabled = enabled
+        self.latency_ms = latency_ms
+        self.bandwidth_mbps = bandwidth_mbps
+        self.loss_rate = loss_rate
+        self._total_latency = 0.0
+        self._total_bandwidth = 0.0
+        self._steps = 0
+        self._losses = 0
+
+    def start_step(self):
+        """Call before gradient sync begins."""
+        if not self.enabled:
+            return
+        self._steps += 1
+
+        # Simulate packet loss: skip this step's sync
+        if self.loss_rate > 0 and self._steps > 5:
+            import random as _random
+            if _random.random() < self.loss_rate:
+                self._losses += 1
+                # Inject extra delay to simulate timeout + recovery
+                time.sleep(self.latency_ms * 4 / 1000.0)
+                return
+
+        # Simulate one-way latency before sync
+        if self.latency_ms > 0:
+            time.sleep(self.latency_ms / 1000.0)
+
+    def throttle(self, data_bytes: int):
+        """Sleep to simulate bandwidth limit for transferring data_bytes."""
+        if not self.enabled or self.bandwidth_mbps <= 0 or data_bytes <= 0:
+            return
+        # bandwidth_mbps is in Megabits/sec, data_bytes is in bytes
+        # Time = data_bits / bandwidth_bps
+        data_bits = data_bytes * 8
+        bandwidth_bps = self.bandwidth_mbps * 1_000_000
+        delay = data_bits / bandwidth_bps
+        if delay > 0:
+            time.sleep(delay)
+            self._total_bandwidth += delay
+
+    def end_step(self):
+        """Call after gradient sync completes — adds return-trip latency."""
+        if not self.enabled or self.latency_ms <= 0:
+            return
+        # Return-trip latency (half the round trip on the other side)
+        time.sleep(self.latency_ms / 1000.0)
+        self._total_latency += self.latency_ms * 2 / 1000.0
+
+    def summary(self) -> dict:
+        """Report how much time was spent on simulated WAN conditions."""
+        if not self.enabled:
+            return {"enabled": False}
+        return {
+            "enabled": True,
+            "latency_ms": self.latency_ms,
+            "bandwidth_mbps": self.bandwidth_mbps,
+            "loss_rate": self.loss_rate,
+            "total_latency_s": round(self._total_latency, 2),
+            "total_bandwidth_s": round(self._total_bandwidth, 2),
+            "total_wan_overhead_s": round(self._total_latency + self._total_bandwidth, 2),
+            "steps": self._steps,
+            "losses": self._losses,
+        }

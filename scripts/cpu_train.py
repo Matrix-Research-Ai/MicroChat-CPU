@@ -38,7 +38,7 @@ from nanochat.common import compute_init, compute_cleanup, print0, DummyWandb, p
 from nanochat.checkpoint_manager import save_checkpoint, load_checkpoint
 from nanochat.loss_eval import evaluate_bpb
 from nanochat.engine import Engine
-from nanochat.cpu_distributed import AdaptiveCommScheduler, TopologyAwareCommunicator, NetworkBenchmark, HeterogeneousLoadBalancer, StragglerMitigator, SyntheticDataLoader, StepProfiler, WANResilienceManager
+from nanochat.cpu_distributed import AdaptiveCommScheduler, TopologyAwareCommunicator, NetworkBenchmark, HeterogeneousLoadBalancer, StragglerMitigator, SyntheticDataLoader, StepProfiler, WANResilienceManager, WANSimulator
 
 # FSDP may be needed for isinstance checks even in single-node mode
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
@@ -130,6 +130,11 @@ parser.add_argument("--profile", action="store_true", default=False, help="enabl
 parser.add_argument("--profile-every", type=int, default=0, help="print per-step timing every N steps (0 = only at end)")
 # Resilience
 parser.add_argument("--resume", action="store_true", default=False, help="resume from latest checkpoint if available")
+# WAN simulation
+parser.add_argument("--simulate-wan", action="store_true", default=False, help="enable WAN simulation: inject artificial latency/bandwidth limits to test compression")
+parser.add_argument("--wan-latency", type=int, default=50, help="simulated one-way WAN latency in ms (default: 50)")
+parser.add_argument("--wan-bandwidth", type=int, default=100, help="simulated WAN bandwidth in Mbps (default: 100)")
+parser.add_argument("--wan-loss-rate", type=float, default=0.0, help="simulated packet loss rate 0.0-1.0 (default: 0.0)")
 # Evaluation
 parser.add_argument("--eval-every", type=int, default=10, help="evaluate val bpb every N steps (-1 = disable)")
 parser.add_argument("--eval-tokens", type=int, default=512, help="number of tokens to evaluate val loss on")
@@ -377,6 +382,19 @@ if args.save_every > 0:
     resilience.register_signal_handlers()
     print0(f"✓ WAN resilience enabled: checkpoint every {args.save_every} steps")
 
+# -----------------------------------------------------------------------------
+# WAN simulator: test compression under realistic WAN conditions
+wan_sim = WANSimulator(
+    enabled=args.simulate_wan,
+    latency_ms=args.wan_latency,
+    bandwidth_mbps=args.wan_bandwidth,
+    loss_rate=args.wan_loss_rate,
+)
+if args.simulate_wan:
+    print0(f"🌐 WAN simulation: {args.wan_latency}ms latency, "
+           f"{args.wan_bandwidth}Mbps bandwidth"
+           + (f", {args.wan_loss_rate*100:.0f}% loss" if args.wan_loss_rate > 0 else ""))
+
 # Auto-resume from latest checkpoint
 if args.resume and resilience.has_checkpoint():
     resume_step = resilience.get_resume_step()
@@ -512,6 +530,7 @@ while True:
 
     # Fire off async gradient sync (all-reduce runs in the background
     # over Gloo while we do compute-independent work below)
+    wan_sim.start_step()
     if args.async_overlap and hasattr(comm, 'start_async_sync'):
         async_handle = comm.start_async_sync()
     else:
@@ -524,6 +543,12 @@ while True:
     for group in optimizer.param_groups:
         group["lr"] = group["initial_lr"] * lrm
 
+    # Simulate bandwidth throttle during overlap window
+    if wan_sim.enabled:
+        total_grad_bytes = sum(p.grad.numel() * 4 for p in model.parameters()
+                               if p.grad is not None and hasattr(p, 'grad'))
+        wan_sim.throttle(total_grad_bytes)
+
     # ── End overlap window: wait for gradients / sync if not async ──
     if async_handle is not None:
         comm.wait_for_sync(async_handle)
@@ -531,6 +556,7 @@ while True:
         comm.sync_gradients(do_average=True)
     else:
         comm.on_optimizer_step(model)
+    wan_sim.end_step()
     profiler.mark('comm')
 
     optimizer.step()
@@ -612,6 +638,20 @@ if val_bpb is not None:
 if master_process and (args.profile or args.dry_run):
     avg_tok = total_training_time / max(step, 1) if total_training_time > 0 else 0
     profiler.print_report(toks_per_sec=args.total_batch_size / max(dt, 1e-6) if dt > 0 else None)
+    if args.simulate_wan:
+        ws = wan_sim.summary()
+        print()
+        print("=" * 55)
+        print("  WAN SIMULATION REPORT")
+        print("=" * 55)
+        print(f"  Latency:        {ws['latency_ms']}ms one-way")
+        print(f"  Bandwidth:      {ws['bandwidth_mbps']} Mbps")
+        print(f"  Loss rate:      {ws['loss_rate']*100:.0f}%")
+        print(f"  Steps simulated: {ws['steps']}")
+        if ws['losses'] > 0:
+            print(f"  Packets lost:   {ws['losses']}")
+        print(f"  WAN overhead:   {ws['total_wan_overhead_s']:.2f}s total")
+        print("=" * 55)
 
 # Dry-run diagnostics
 if args.dry_run and master_process:
