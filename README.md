@@ -53,6 +53,17 @@ bash runs/runcpu_distributed.sh topology-aware --node-rank=0 --nnodes=4 --master
 bash runs/runcpu_distributed.sh lan --hetero --node-rank=0 --nnodes=3 --master-addr=192.168.1.10
 ```
 
+### Cluster launcher (auto-SSH to all nodes)
+
+Edit `runs/launch_cluster.sh` with your node IPs, then:
+
+```bash
+# Sync code + launch on all nodes automatically
+bash runs/launch_cluster.sh lan --synthetic --dry-run
+bash runs/launch_cluster.sh wan --hetero --num-iterations=500
+bash runs/launch_cluster.sh benchmark
+```
+
 ## What's Different from nanochat
 
 | Feature | nanochat (original) | MicroChat-CPU |
