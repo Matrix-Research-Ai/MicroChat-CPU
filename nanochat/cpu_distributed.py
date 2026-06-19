@@ -1002,6 +1002,14 @@ class StragglerMitigator:
         self._recent_times: list[float] = []
         self._node_medians: list[float] = []
         self._warnings: int = 0
+        self._consecutive_straggler_checks: int = 0
+        self._failover_after_checks: int = 3  # fail after 3 consecutive straggler detections
+        self._failover_triggered = False
+
+    @property
+    def should_failover(self) -> bool:
+        """True if failover has been triggered (straggler too many times)."""
+        return self._failover_triggered
 
     def record(self, dt: float):
         """Record this step's duration."""
@@ -1031,8 +1039,15 @@ class StragglerMitigator:
 
         if stragglers and self.rank == 0:
             self._warnings += 1
-            print(f"⚠ Straggler(s) detected: ranks {stragglers} "
-                  f"({self._warnings} consecutive checks)")
+            self._consecutive_straggler_checks += 1
+            print(f"  ⚠ Straggler(s) detected: ranks {stragglers} "
+                  f"({self._consecutive_straggler_checks}/{self._failover_after_checks})")
+            if self._consecutive_straggler_checks >= self._failover_after_checks:
+                self._failover_triggered = True
+                print(f"  🚨 FAILOVER: straggler persistent after "
+                      f"{self._failover_after_checks} checks — saving checkpoint")
+        else:
+            self._consecutive_straggler_checks = 0
 
         return stragglers if stragglers else None
 

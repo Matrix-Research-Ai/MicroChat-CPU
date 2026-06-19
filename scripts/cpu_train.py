@@ -574,6 +574,25 @@ while True:
         sg = straggler_watch.check_stragglers()
         if sg and master_process:
             print0(f"⚠ Straggler ranks: {sg} — consider --straggler-ratio adjustment")
+        if straggler_watch.should_failover:
+            print0("🚨 Failover triggered — saving checkpoint and exiting")
+            print0(f"   Remove the straggling node and restart with --resume")
+            # Force checkpoint save before exit
+            resilience.maybe_save(
+                step=step, model=orig_model, optimizer=optimizer, force=True,
+                metadata={
+                    "model_config": model_config_kwargs, "user_config": user_config,
+                    "device_batch_size": effective_device_batch,
+                    "max_seq_len": args.max_seq_len, "total_batch_size": args.total_batch_size,
+                    "val_bpb": val_bpb, "min_val_bpb": min_val_bpb,
+                    "smooth_train_loss": smooth_train_loss,
+                    "total_training_time": total_training_time,
+                },
+                dataloader_state_dict=dataloader_state_dict,
+            )
+            compute_cleanup()
+            import sys as _sys
+            _sys.exit(42)  # exit code 42 = straggler failover
 
     # --- Logging ---
     train_loss_f = train_loss.item()

@@ -214,15 +214,55 @@ echo "============================================"
 
 # Wait for all background processes
 FAILED=0
+STOPPED_NODES=""
 for PID in $PID_LIST; do
-    wait $PID || FAILED=$((FAILED + 1))
+    wait $PID || {
+        EXIT_CODE=$?
+        FAILED=$((FAILED + 1))
+        if [ $EXIT_CODE -eq 42 ]; then
+            echo "  ⚠ Node exited with code 42 (straggler failover)"
+            STOPPED_NODES="$STOPPED_NODES $PID"
+        fi
+    }
 done
 
 echo ""
 if [ $FAILED -eq 0 ]; then
     echo "✓ All nodes completed successfully"
+elif [ -n "$STOPPED_NODES" ]; then
+    echo "⚠ $FAILED node(s) failed due to straggler detection"
+
+    # Remove failed nodes and restart
+    if [ $NNODES -gt 1 ]; then
+        # Remove the last failed node from NODES list
+        LAST_FAILED_IP=""
+        for NODE in "${NODES[@]}"; do
+            ssh $SSH_OPTS "${SSH_USER}@${NODE}" "exit 42" 2>/dev/null && LAST_FAILED_IP="$NODE"
+        done
+
+        if [ -n "$LAST_FAILED_IP" ]; then
+            echo "  Removing failed node: $LAST_FAILED_IP"
+            NEW_NODES=()
+            for NODE in "${NODES[@]}"; do
+                if [ "$NODE" != "$LAST_FAILED_IP" ]; then
+                    NEW_NODES+=("$NODE")
+                fi
+            done
+            NODES=("${NEW_NODES[@]}")
+            NNODES=${#NODES[@]}
+            MASTER_ADDR="${NODES[0]}"
+
+            echo "  Restarting with $NNODES nodes: ${NODES[*]}"
+            echo "  Using --resume to continue from last checkpoint"
+            echo ""
+
+            # Re-launch with resume
+            bash "$0" "$MODE" --resume $EXTRA_ARGS
+            exit $?
+        fi
+    fi
 else
-    echo "⚠ $FAILED node(s) failed — check output above"
+    echo "⚠ $FAILED node(s) failed with unknown errors"
 fi
 
 # Cleanup: kill any remaining remote processes
